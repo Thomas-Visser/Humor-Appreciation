@@ -1,0 +1,3199 @@
+---
+title: '2022: Humor Appreciation'
+author: "Thomas Visser"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+##### loading in the data
+
+```{r}
+library(tidyverse) # making the package available in R
+library(readr) # making the package available in R
+library(ggplot2) # making the package available in R
+library(stringi) # rename columns
+
+library(tidymodels)  # for the parsnip package, along with the rest of tidymodels
+library(broom.mixed) # for converting bayesian models to tidy tibbles
+library(dotwhisker)  # for visualizing regression results
+library(xgboost) # boosted decision trees
+library(janitor) # data cleaning
+library(Rfast) # select second higest/lowest values
+
+# speed up computation with parrallel processing (optional)
+library(doParallel)
+all_cores <- parallel::detectCores(logical = FALSE)
+registerDoParallel(cores = all_cores)
+
+library(caret) # confusionmatrix
+library(vip)   # Feature importance rankings
+library(ggcorrplot) # to plot correlation matrix
+
+data <- read.csv2('humor_data.csv')
+
+```
+### file shows the modeling and the making of plots for the thesis 
+
+##### remove variables that won't be used for analysis
+
+```{r}
+
+data_rem = data %>% select(- c(ï..NR, State, Working.status, Children.in.household...18., 
+                               Household.size, Net.household.income, Civil.status, 
+                               Academic...Professional.education, School.education,
+                               City, Urban...100k.Pop.., Platform, X9..Next..humorous.texts.and.images.will.be.shown..Each.time..we.will.ask.two.questions.about.your.response.))
+```
+
+##### rename variables
+
+```{r}
+# rename variables into understandable names
+data_rename = data_rem %>% 
+  rename(
+    personality_1 = X1..I.see.myself.as.someone.who........is.reserved.,
+    personality_2 = X1..I.see.myself.as.someone.who........is.generally.trusting.,
+    personality_3 = X1..I.see.myself.as.someone.who........tends.to.be.lazy.,
+    personality_4 = X1..I.see.myself.as.someone.who........is.relaxed..handles.stress.well.,
+    personality_5 = X1..I.see.myself.as.someone.who........has.few.artistic.interests.,
+    personality_6 = X1..I.see.myself.as.someone.who........is.outgoing..sociable.,
+    personality_7 = X1..I.see.myself.as.someone.who........tends.to.find.fault.with.others.,
+    personality_8 = X1..I.see.myself.as.someone.who........does.a.thorough.job.,
+    personality_9 = X1..I.see.myself.as.someone.who........gets.nervous.easily.,
+    personality_10 = X1..I.see.myself.as.someone.who........has.an.active.imagination.,
+    attitudes_1 = X2..Please..Indicate.your.level.of.agreement..I.think.jokes.about.gender.are.funny.,
+    attitudes_2 = X2..Please..Indicate.your.level.of.agreement..I.enjoy.clever.insults.,
+    attitudes_3 = X2..Please..Indicate.your.level.of.agreement..I.like.pictures.of.cute.animals.,
+    attitudes_4 = X2..Please..Indicate.your.level.of.agreement..I.am.very.familiar.with.Game.of.Thrones.,
+    attitudes_5 = X2..Please..Indicate.your.level.of.agreement..I.think.jokes.about.other.people.s.appearance.are.funny.,
+    attitudes_6 = X2..Please..Indicate.your.level.of.agreement..I.like.puns.,
+    attitudes_7 = X2..Please..Indicate.your.level.of.agreement..I.think.men.only.care.about.themselves.while.having.sex.,
+    attitudes_8 = X2..Please..Indicate.your.level.of.agreement..I.am.amused.by.self.deprecating.jokes.,
+    attitudes_9 = X2..Please..Indicate.your.level.of.agreement..I.like.a.good.comeback.,
+    attitudes_10 = X2..Please..Indicate.your.level.of.agreement..I.enjoy.romantic.comedies.,
+    sens_seeking_1 = X3..Please..Indicate.your.level.of.agreement..I.would.like.to.explore.strange.places.,
+    sens_seeking_2 = X3..Please..Indicate.your.level.of.agreement..I.get.restless.when.I.spend.too.much.time.at.home.,
+    sens_seeking_3 = X3..Please..Indicate.your.level.of.agreement..I.like.to.do.frightening.things.,
+    sens_seeking_4 = X3..Please..Indicate.your.level.of.agreement..I.like.wild.parties.,
+    sens_seeking_5 = X3..Please..Indicate.your.level.of.agreement..I.would.like.to.take.off.on.a.trip.with.no.pre.planned.routes.or.timetables.,
+    sens_seeking_6 = X3..Please..Indicate.your.level.of.agreement..I.prefer.friends.who.are.excitingly.unpredictable.,
+    sens_seeking_7 = X3..Please..Indicate.your.level.of.agreement..I.would.like.to.try.bungee.jumping.,
+    sens_seeking_8 = X3..Please..Indicate.your.level.of.agreement..I.would.love.to.have.new.and.exciting.experiences..even.if.they.are.illegal.,
+    prod_jokes_1 = X4..Please..Indicate.your.level.of.agreement..I.often.say.or.write.jokes.and.funny.stories,
+    prod_jokes_2 = X4..Please..Indicate.your.level.of.agreement..I.m.confident.that.I.can.make.other.people.laugh,
+    prod_jokes_3 = X4..Please..Indicate.your.level.of.agreement..I.use.humor.to.entertain.my.friends,
+    prod_jokes_4 = X4..Please..Indicate.your.level.of.agreement..I.can.often.crack.people.up.with.the.things.I.say,
+    morality_1 = X5..Imagine.a.person.with.the.following.characteristics.....br..br..b.Caring.br..Compassionate.br..Fair.br..Friendly.br..Generous.br..Helpful.br..Hardworking.br..Honest.br..Kind.It.would.make.me.feel.good.to.be.this.person.,
+    morality_2 = X5..Imagine.a.person.with.the.following.characteristics.....br..br..b.Caring.br..Compassionate.br..Fair.br..Friendly.br..Generous.br..Helpful.br..Hardworking.br..Honest.br..Kind.Being.a.person.like.this.is.an.important.part.of.who.I.am.,
+    morality_3 = X5..Imagine.a.person.with.the.following.characteristics.....br..br..b.Caring.br..Compassionate.br..Fair.br..Friendly.br..Generous.br..Helpful.br..Hardworking.br..Honest.br..Kind.I.would.be.ashamed.to.be.this.person.,
+    morality_4 = X5..Imagine.a.person.with.the.following.characteristics.....br..br..b.Caring.br..Compassionate.br..Fair.br..Friendly.br..Generous.br..Helpful.br..Hardworking.br..Honest.br..Kind.Having.these.characteristics.is.not.really.important.to.me.,
+    morality_5 = X5..Imagine.a.person.with.the.following.characteristics.....br..br..b.Caring.br..Compassionate.br..Fair.br..Friendly.br..Generous.br..Helpful.br..Hardworking.br..Honest.br..Kind.I.strongly.desire.to.have.these.characteristics.,
+    cheerful_1 = X7..Please.indicate.how.much.you.agree..I.am.cheerful.,
+    cheerful_2 = X7..Please.indicate.how.much.you.agree..I.am.ready.to.have.some.fun.,
+    cheerful_3 = X7..Please.indicate.how.much.you.agree..I.could.laugh.at.the.drop.of.a.hat.,
+    cheerful_4 = X7..Please.indicate.how.much.you.agree..I.m.walking.on.air.,
+    cheerful_5 = X7..Please.indicate.how.much.you.agree..I.am.amused.,
+    cheerful_6 = X7..Please.indicate.how.much.you.agree..I.am.delighted.,
+    mood_1 = X8..How.do.you.currently.feel..Upset,
+    mood_2 = X8..How.do.you.currently.feel..Hostile,
+    mood_3 = X8..How.do.you.currently.feel..Alert,
+    mood_4 = X8..How.do.you.currently.feel..Ashamed,
+    mood_5 = X8..How.do.you.currently.feel..Inspired,
+    mood_6 = X8..How.do.you.currently.feel..Nervous,
+    mood_7 = X8..How.do.you.currently.feel..Determined,
+    mood_8 = X8..How.do.you.currently.feel..Attentive,
+    mood_9 = X8..How.do.you.currently.feel..Afraid,
+    mood_10 = X8..How.do.you.currently.feel..Active,
+    joke_1_contin = X10...Knock..knock..Whoâ..s.there..Olive..Olive..who..Olive.you..and.I.donâ..t.care.who.knows.it....in...,
+    joke_1_binary = X11...Knock..knock..Whoâ..s.there..Olive..Olive..who..Olive.you..and.I.donâ..t.care.who.knows.it..,
+    joke_2_contin = X12...I.m.not.saying.I.hate.you..but.I.would.unplug.your.life.support.to.charge.my.phone....in...,
+    joke_2_binary = X13...I.m.not.saying.I.hate.you..but.I.would.unplug.your.life.support.to.charge.my.phone..,
+    joke_3_contin = X14...Can.a.kangaroo.jump.higher.than.the.Empire.State.Building....Of.course..The.Empire.State.Building.can.t.jump....in...,
+    joke_3_binary = X15...Can.a.kangaroo.jump.higher.than.the.Empire.State.Building....Of.course..The.Empire.State.Building.can.t.jump..,
+    joke_4_contin = X16...Itâ..s.true.that.Iâ..m.CUTE..C.ringy...U.nattractive...T.rash...and.E.asy.to.forget.....in...,
+    joke_4_binary = X17...Itâ..s.true.that.Iâ..m.CUTE..C.ringy...U.nattractive...T.rash...and.E.asy.to.forget...,
+    joke_5_contin = X18...Whatâ..s.the.difference.between.a.G.spot.and.a.golf.ball.....A.man.will.actually.search.for.a.golf.ball....in...,
+    joke_5_binary = X19...Whatâ..s.the.difference.between.a.G.spot.and.a.golf.ball.....A.man.will.actually.search.for.a.golf.ball..,
+    joke_6_contin = X20..How.funny.do.you.find.this.image...in...,
+    joke_6_binary = X21..Final.evaluation.,
+    joke_7_contin = X22..How.funny.do.you.find.this.image...in...,
+    joke_7_binary = X23..Final.evaluation.,
+    joke_8_contin = X24..How.funny.do.you.find.this.image...in...,
+    joke_8_binary = X25..Final.evaluation.,
+    joke_9_contin = X26..How.funny.do.you.find.this.image...in...,
+    joke_9_binary = X27..Final.evaluation.,
+    joke_10_contin = X28..How.funny.do.you.find.this.image...in...,
+    joke_10_binary = X29..Final.evaluation.,
+    english_und = X30..How.hard.was.it.for.you.to.understand.the.English.language.vocabulary.in.the.jokes...in...
+  )
+
+```
+
+### create a test and train split and random noise predictor
+
+```{r}
+# Fix the random numbers by setting the seed so analysis is reproducible
+set.seed(2)
+
+# add a random noise predictor to the data
+data_rename$random_noise = rnorm(5473, mean = 0, sd = 1)
+
+# 80% of the data will be training data other 20% will be test data
+data_split <- initial_split(data_rename, prop = 4/5)
+
+# Create data frames for the two datasets
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+# change the even outcome variables to factors and the uneven outcome variables to integers
+train_data[,c(57,59,61,63,65,67,69,71,73,75)] <- lapply(train_data[,c(57,59,61,63,65,67,69,71,73,75)], as.integer)
+train_data[,c(58,60,62,64,66,68,70,72,74,76)] <- lapply(train_data[,c(58,60,62,64,66,68,70,72,74,76)], as.factor)
+
+test_data[,c(57,59,61,63,65,67,69,71,73,75)] <- lapply(test_data[,c(57,59,61,63,65,67,69,71,73,75)], as.integer)
+test_data[,c(58,60,62,64,66,68,70,72,74,76)] <- lapply(test_data[,c(58,60,62,64,66,68,70,72,74,76)], as.factor)
+```
+
+## create duplicates of data for the model loop
+
+```{r}
+# create 2 duplicates of the official training, validation and test data
+train = train_data
+train_dupe = train_data
+
+test = test_data
+test_dupe = test_data
+
+```
+
+### Loop over all jokes and compute logistic regression or linear regression
+
+```{r}
+# Fix the random numbers by setting the seed so analysis is reproducible
+set.seed(2)
+# fix within the model
+# create empty variables to store information for the loops
+regr_train_mae = rep(NA, 10)
+regr_test_mae = rep(NA, 10)
+regr_train_mape = rep(NA, 10)
+regr_test_mape = rep(NA, 10)
+regr_train_rmse = rep(NA, 10)
+regr_test_rmse = rep(NA, 10)
+regr_train_acc = rep(NA, 10)
+regr_test_acc = rep(NA, 10)
+class_train_information = rep(NA,10)
+class_test_information = rep(NA,10)
+class_train_auc = rep(NA,10)
+class_test_auc = rep(NA,10)
+class_train_acc = rep(NA, 10)
+class_test_acc = rep(NA, 10)
+importance_regr = list()
+importance_class = list()
+
+model_fit_linear = list()
+model_fit_logistic = list()
+augment_fit_linear = list()
+augment_fit_logistic = list()
+
+lin_data_regr_test = list()
+lin_data_regr_train = list()
+
+log_data_class_test = list()
+log_data_class_train = list()
+
+
+# loop over every joke: 2 dependent variables per joke gives 20 iterations
+for (i in 1:20) {
+  
+  # change outcome variable to y for the recipe function and change it back to 
+  # its original name after the loop
+  colnames(train)[55+i] <- colnames(train_dupe)[55+i]
+  colnames(train)[55+(i+1)] <- "y"
+  
+  colnames(test)[55+i] <- colnames(test_dupe)[55+i]
+  colnames(test)[55+(i+1)] <- "y"
+  
+  # We do not want the other dependent variable of the same joke as a predictor
+  # Name this variable r so that we can remove this in the model
+  if (any(colnames(train) == 'r')) { 
+    colnames(train)[55+(i-1)] <- colnames(train_dupe)[55+(i-1)]
+    colnames(test)[55+(i-1)] <- colnames(test_dupe)[55+(i-1)]
+  }
+  
+  train = rename(train, "r" = colnames(train %>% select(starts_with(paste('joke_',ceiling(i/2), '_', sep = "")))))
+  test = rename(test, "r" = colnames(test %>% select(starts_with(paste('joke_',ceiling(i/2), '_', sep = "")))))
+  
+  # the model
+  recipe_joke = recipe(y ~ ., data = train) %>% 
+    step_rm(r) %>% 
+    step_scale(all_numeric())
+  
+  # if type = integer it should be a linear regression, otherwise it should be a logistical regression
+  if(is.factor(train$y) == FALSE){
+    
+    reg <- linear_reg() %>% 
+      set_engine('lm') %>%
+      set_mode('regression')
+    
+  } else {
+    
+    reg <- logistic_reg() %>% 
+      set_engine("glm")
+  }
+  
+  # compute the workflow of the model by adding the recipe and the model 
+  workfl_joke <- workflow() %>% 
+    add_model(reg) %>% 
+    add_recipe(recipe_joke)
+  
+  # bake the recipe such that the steps of the recipes are taken into account
+  train_baked <- recipe_joke %>% 
+    prep() %>% 
+    bake(new_data = train)
+  
+  # fit the model
+  joke_fit <- 
+    reg %>% 
+    fit(y ~ ., data = train_baked)
+  
+  # evaluate model on the train data
+  eval_train = augment(joke_fit, train)
+  #evaluate model on the test data
+  eval_test = augment(joke_fit, test)
+  
+  # if type = integer it should be a linear regression, otherwise it should be a logistical regression
+  if(is.factor(train$y) == FALSE){
+    
+    model_fit_linear[[ceiling(i/2)]] = joke_fit
+    augment_fit_linear[[ceiling(i/2)]] = eval_test
+    lin_data_regr_test[[ceiling(i/2)]] = test
+    lin_data_regr_train[[ceiling(i/2)]] = train
+    
+    
+    # mean absolute error
+    temp_train_mae = mae(eval_train, y, .pred)
+    temp_test_mae = mae(eval_test, y, .pred)
+    # mean absolute percentage error
+    temp_train_mape = mape(eval_train, y, .pred)
+    temp_test_mape = mape(eval_test, y, .pred)
+    # mean absolute error
+    temp_train_rmse = rmse(eval_train, y, .pred)
+    temp_test_rmse = rmse(eval_test, y, .pred)
+    # R squared
+    temp_train_acc = rsq(eval_train, y, .pred)
+    temp_test_acc = rsq(eval_test, y, .pred)
+    
+    # save statistics
+    regr_train_mae[ceiling(i/2)] = temp_train_mae$.estimate
+    regr_test_mae[ceiling(i/2)] =  temp_test_mae$.estimate
+    regr_train_mape[ceiling(i/2)] =  temp_train_mape$.estimate
+    regr_test_mape[ceiling(i/2)] =  temp_test_mape$.estimate
+    regr_train_rmse[ceiling(i/2)] = temp_train_rmse$.estimate
+    regr_test_rmse[ceiling(i/2)] = temp_test_rmse$.estimate
+    regr_train_acc[ceiling(i/2)] = temp_train_acc$.estimate
+    regr_test_acc[ceiling(i/2)] =  temp_test_acc$.estimate 
+    # importance rankings
+    importance_regr[[ceiling(i/2)]] = vip(joke_fit, num_features = 79)
+    
+  } else {
+    
+    # temporary confusion matrix
+    temp_train = confusionMatrix(eval_train$.pred_class, as.factor(eval_train$y))
+    temp_test = confusionMatrix(eval_test$.pred_class, as.factor(eval_test$y))
+    
+    model_fit_logistic[[ceiling(i/2)]] = joke_fit
+    augment_fit_logistic[[ceiling(i/2)]] = eval_test
+    
+    log_data_class_test[[ceiling(i/2)]] = test
+    log_data_class_train[[ceiling(i/2)]] = train
+    
+    # save statistics
+    # accuracy
+    class_train_acc[ceiling(i/2)] = temp_train[["overall"]][["Accuracy"]]
+    class_test_acc[ceiling(i/2)] = temp_test[["overall"]][["Accuracy"]]
+    # information rate
+    class_train_information[ceiling(i/2)] = temp_train[["overall"]][["AccuracyNull"]]
+    class_test_information[ceiling(i/2)] = temp_test[["overall"]][["AccuracyNull"]]
+    # auc
+    class_train_auc[ceiling(i/2)] = roc_auc(eval_train, y, ".pred_Bad joke")$.estimate 
+    class_test_auc[ceiling(i/2)] = roc_auc(eval_test, y, ".pred_Bad joke")$.estimate 
+    # importance rankings
+    importance_class[[ceiling(i/2)]] = vip(joke_fit, num_features = 79)  
+  }
+}
+
+# change last y and r values back to their original column name
+colnames(train)[76] <- colnames(train_dupe)[76]
+colnames(test)[76] <- colnames(test_dupe)[76]
+colnames(train)[75] <- colnames(train_dupe)[75]
+colnames(test)[75] <- colnames(test_dupe)[75]
+
+
+# create a data frame with all important variables
+df_scores_regression = data.frame(regr_train_mae = regr_train_mae,
+                       regr_test_mae = regr_test_mae,
+                       regr_train_mape = regr_train_mape,
+                       regr_test_mape = regr_test_mape,
+                       regr_train_rmse = regr_train_rmse,
+                       regr_test_rmse = regr_test_rmse,
+                       regr_train_acc = regr_train_acc,
+                       regr_test_acc = regr_test_acc,
+                       class_train_information = class_train_information,
+                       class_test_information = class_test_information,
+                       class_train_auc = class_train_auc,
+                       class_test_auc = class_test_auc,
+                       class_train_acc = class_train_acc,
+                       class_test_acc = class_test_acc)
+df_scores_regression
+```
+
+### Loop over all jokes and compute boosted decision trees
+
+```{r}
+# Fix the random numbers by setting the seed so analysis is reproducible
+set.seed(2)
+
+# create empty variables to store information from the loops
+class_tree_train_acc = rep(NA, 10)
+class_tree_test_acc = rep(NA, 10)
+class_tree_train_information = rep(NA, 10)
+class_tree_test_information = rep(NA, 10)
+class_tree_train_auc = rep(NA, 10)
+class_tree_test_auc = rep(NA, 10)
+regr_tree_train_acc = rep(NA, 10)
+regr_tree_test_acc = rep(NA, 10)
+regr_tree_train_mae = rep(NA, 10)
+regr_tree_test_mae = rep(NA, 10)
+regr_tree_train_mape = rep(NA, 10)
+regr_tree_test_mape = rep(NA, 10)
+regr_tree_train_rmse = rep(NA, 10)
+regr_tree_test_rmse = rep(NA, 10)
+importance_tree_regr = list()
+importance_tree_class = list()
+
+model_fit_tree_class = list()
+model_fit_tree_regr = list()
+pred_tree_class = list()
+pred_tree_regr = list()
+tree_data_regr_test = list()
+tree_data_regr_train = list()
+tree_data_regr_test_dat = list()
+tree_data_regr_train_dat = list()
+model_final_tree_regr = list()
+
+tree_data_class_test = list()
+tree_data_class_train = list()
+tree_data_class_test_dat = list()
+tree_data_class_train_dat = list()
+model_final_tree_class = list()
+
+# loop over every joke
+for (i in 1:20) {
+  
+  # change outcome variable to y for the recipe function and change it back to 
+  # its original name after the loop
+  colnames(train)[55+i] <- colnames(train_dupe)[55+i]
+  colnames(train)[55+(i+1)] <- "y"
+  
+  colnames(test)[55+i] <- colnames(test_dupe)[55+i]
+  colnames(test)[55+(i+1)] <- "y"
+  
+  # We do not want the other dependent variable of the same joke as a predictor
+  # Name this variable r so that we can remove this in the model
+  if (any(colnames(train) == 'r')) { 
+    colnames(train)[55+(i-1)] <- colnames(train_dupe)[55+(i-1)]
+    colnames(test)[55+(i-1)] <- colnames(test_dupe)[55+(i-1)]
+  }
+  
+  train = rename(train, "r" = colnames(train %>% select(starts_with(paste('joke_',ceiling(i/2), '_', sep = "")))))
+  test = rename(test, "r" = colnames(test %>% select(starts_with(paste('joke_',ceiling(i/2), '_', sep = "")))))
+  
+  # pre-processing recipe
+  preprocessing_recipe <- recipe(y ~ ., data = train) %>%
+    # convert categorical variables to dummy variables
+    step_string2factor(all_nominal()) %>%
+    # standardize numeric predictors
+    step_rm(r) %>% 
+    step_scale(all_numeric()) %>% 
+    prep()
+  
+  # cross validation folds
+  cell_folds = vfold_cv(train, 10)
+  
+  # use multiple cores so the tuning goes faster
+  registerDoParallel()
+  
+  # if type = integer it should be a linear regression, otherwise it should be a logistical regression
+  if(is.factor(train$y) == FALSE){
+    
+    # create a decision tree with tuning parameters
+    tree_model <- boost_tree( 
+      mode = "regression",
+      trees = 1000,
+      min_n = tune(),
+      tree_depth = tune(),
+      learn_rate = tune(),
+      loss_reduction = tune()) %>%
+      set_engine("xgboost")
+    
+    # select parameters
+    xgboost_grid <- grid_max_entropy(
+      min_n(),
+      tree_depth(),
+      learn_rate(),
+      loss_reduction(), 
+      size = 30)
+    
+    # identify workflow
+    xgboost_wf <- 
+      workflow() %>%
+      add_formula(y ~ .) %>% 
+      add_model(tree_model)
+    
+    # tuning the parameters
+    xgboost_tuned <- tune_grid(
+      object = xgboost_wf,
+      resamples = cell_folds,
+      grid = xgboost_grid,
+      metrics = metric_set(rmse, rsq, mae, mape),
+      control = control_grid(verbose = TRUE))
+    
+    # select the tuning parameters with the best rmse
+    xgboost_best_params <- xgboost_tuned %>%
+      select_best("rmse")
+    
+    # use the tuned parameters for the final model
+    model_final <- tree_model %>% 
+      finalize_model(xgboost_best_params)
+    
+  } else {
+    
+    # create a decision tree with tuning parameters
+    tree_model <- boost_tree( 
+      trees = 1000, 
+      tree_depth = tune(), min_n = tune(), 
+      loss_reduction = tune(),                     
+      sample_size = tune(), mtry = tune(),         
+      learn_rate = tune()) %>% 
+      set_engine("xgboost") %>% 
+      set_mode("classification")
+    
+    # select parameters
+    xgboost_grid <- grid_latin_hypercube(
+      tree_depth(),
+      min_n(),
+      loss_reduction(),
+      sample_size = sample_prop(),
+      finalize(mtry(), train),
+      learn_rate(),
+      size = 30)
+    
+    # identify workflow  
+    xgboost_wf <- workflow() %>%
+      add_formula(y ~ .) %>% 
+      add_model(tree_model)
+    
+    # tuning the parameters
+    xgboost_tuned <- tune_grid(
+      xgboost_wf,
+      resamples = cell_folds,
+      grid = xgboost_grid,
+      control = control_grid(save_pred = TRUE))
+    
+    # select the tuning parameters with the best auc
+    xgboost_best_params <- select_best(xgboost_tuned, "roc_auc")
+    
+    # updating the model with the best tuning parameters
+    model_final <- tree_model %>% 
+      finalize_model(xgboost_best_params)
+    
+  }
+  
+  # fit the model on the standardized data
+  train_processed <- bake(preprocessing_recipe,  new_data = train)
+  test_processed  <- bake(preprocessing_recipe, new_data = test)
+  tree_fit <- model_final %>%
+    fit(formula = y ~ ., data = train_processed) 
+  
+  if(is.factor(train$y) == FALSE){
+    
+    # predict the model on the training and test data
+    train_prediction = tree_fit %>%
+      predict(new_data = train_processed) %>%
+      bind_cols(train)
+    test_prediction = tree_fit %>%
+      predict(new_data = test_processed) %>%
+      bind_cols(test)
+    
+    # get model metrics
+    tree_acc_train <- train_prediction %>%
+      metrics(y, .pred) %>%
+      mutate(.estimate = format(round(.estimate, 2), big.mark = ","))
+    
+    tree_acc_test <- test_prediction %>%
+      metrics(y, .pred) %>%
+      mutate(.estimate = format(round(.estimate, 2), big.mark = ","))
+    
+    model_fit_tree_regr[[ceiling(i/2)]] = tree_fit
+    pred_tree_regr[[ceiling(i/2)]] = test_prediction
+    tree_data_regr_test[[ceiling(i/2)]] = test_processed
+    tree_data_regr_train[[ceiling(i/2)]] = train_processed
+    
+    tree_data_regr_test_dat[[ceiling(i/2)]] = test
+    tree_data_regr_train_dat[[ceiling(i/2)]] = train
+    
+    model_final_tree_regr[[ceiling(i/2)]] = model_final
+    
+        # save statistics
+    # mean absolute error
+    regr_tree_train_mae[ceiling(i/2)] = tree_acc_train$.estimate[3]
+    regr_tree_test_mae[ceiling(i/2)] =  tree_acc_test$.estimate[3]
+    # R squared
+    regr_tree_train_acc[ceiling(i/2)] = tree_acc_train$.estimate[2]
+    regr_tree_test_acc[ceiling(i/2)] =  tree_acc_test$.estimate[2]
+    # RMSE
+    regr_tree_train_rmse[ceiling(i/2)] = tree_acc_train$.estimate[1]
+    regr_tree_test_rmse[ceiling(i/2)] =  tree_acc_test$.estimate[1]
+    # Mape
+    regr_tree_train_mape[ceiling(i/2)] = mape(train_prediction, y, .pred)$.estimate
+    regr_tree_test_mape[ceiling(i/2)] =  mape(test_prediction, y, .pred)$.estimate
+    # importance rankings
+    importance_tree_regr[[ceiling(i/2)]] = vip(tree_fit, num_features = 91)
+    
+    print(i)
+    
+  } else {
+    
+    # predict the model on the training and test data
+    train_prediction = tree_fit %>%
+      predict(new_data = train_processed) %>%
+      bind_cols(predict(tree_fit, train_processed, type = "prob")) %>% 
+      bind_cols(train)
+    
+    test_prediction = tree_fit %>%
+      predict(new_data = test_processed) %>%
+      bind_cols(predict(tree_fit, test_processed, type = "prob")) %>% 
+      bind_cols(test)
+    
+    model_fit_tree_class[[ceiling(i/2)]] = tree_fit
+    pred_tree_class[[ceiling(i/2)]] = test_prediction
+    tree_data_class_test[[ceiling(i/2)]] = test_processed
+    tree_data_class_train[[ceiling(i/2)]] = train_processed
+    
+    tree_data_class_test_dat[[ceiling(i/2)]] = test
+    tree_data_class_train_dat[[ceiling(i/2)]] = train
+    
+    model_final_tree_class[[ceiling(i/2)]] = model_final
+    
+    
+    # get model metrics
+    tree_temp_train <- confusionMatrix(train_prediction$.pred_class, as.factor(train_prediction$y))
+    tree_temp_test <- confusionMatrix(test_prediction$.pred_class, as.factor(test_prediction$y))
+    
+    # save statistics
+    # accuracy
+    class_tree_train_acc[ceiling(i/2)] = tree_temp_train[["overall"]][["Accuracy"]]
+    class_tree_test_acc[ceiling(i/2)] = tree_temp_test[["overall"]][["Accuracy"]]
+    # information rate
+    class_tree_train_information[ceiling(i/2)] = tree_temp_train[["overall"]][["AccuracyNull"]]
+    class_tree_test_information[ceiling(i/2)] = tree_temp_test[["overall"]][["AccuracyNull"]]
+    # auc
+    class_tree_train_auc[ceiling(i/2)] = roc_auc(train_prediction, y, ".pred_Bad joke")$.estimate
+    class_tree_test_auc[ceiling(i/2)] = roc_auc(test_prediction, y, ".pred_Bad joke")$.estimate
+    # importance rankings
+    importance_tree_class[[ceiling(i/2)]] = vip(tree_fit, num_features = 91)  
+    
+    print(i)
+    
+  }
+}
+
+# change last y and r values back to their original column name
+colnames(train)[76] <- colnames(train_dupe)[76]
+colnames(test)[76] <- colnames(test_dupe)[76]
+colnames(train)[75] <- colnames(train_dupe)[75]
+colnames(test)[75] <- colnames(test_dupe)[75]
+
+# create a data frame with all important variables
+df_scores_tree = data.frame(regr_tree_train_mae = regr_tree_train_mae,
+                       regr_tree_test_mae = regr_tree_test_mae,
+                       regr_tree_train_rmse = regr_tree_train_rmse,
+                       regr_tree_test_rmse = regr_tree_test_rmse,
+                       regr_tree_train_mape = regr_tree_train_mape,
+                       regr_tree_test_mape = regr_tree_test_mape,
+                       regr_tree_train_acc = regr_tree_train_acc,
+                       regr_tree_test_acc = regr_tree_test_acc,
+                       class_tree_train_information = class_tree_train_information,
+                       class_tree_test_information = class_tree_test_information,
+                       class_tree_train_auc = class_tree_train_auc,
+                       class_tree_test_auc = class_tree_test_auc,
+                       class_tree_train_acc = class_tree_train_acc,
+                       class_tree_test_acc = class_tree_test_acc)
+df_scores_tree
+```
+
+
+# creating first basic plots of the data without combining and confidence intervals
+# for confidence intervals with bootstrapping (as shown in the thesis) see below this code
+
+## combing importance scores for linear and logistic regression models
+
+```{r}
+# saving the importance score of the first joke
+importance_regression_scores = importance_regr[[1]][["data"]] %>% dplyr::rename(!!paste('importance_', 1, sep = "") := Importance)
+
+# save importance scores of all jokes
+for (i in 2:10) {
+temp_score = importance_regr[[i]][["data"]] %>% dplyr::rename(!!paste('importance_', i, sep = "") := Importance)
+importance_regression_scores = importance_regression_scores %>% full_join(temp_score, by = 'Variable')
+}
+
+# saving the importance score of the first joke
+importance_classification_scores = importance_class[[1]][["data"]] %>% dplyr::rename(!!paste('importance_', 1, sep = "") := Importance)
+
+# save importance scores of all jokes
+for (i in 2:10) {
+temp_score = importance_class[[i]][["data"]] %>% dplyr::rename(!!paste('importance_', i, sep = "") := Importance)
+importance_classification_scores = importance_classification_scores %>% full_join(temp_score, by = 'Variable')
+}
+
+```
+
+
+## linear regression importance
+
+```{r}
+# change to dataframe
+importance_regression_scores = data.frame(importance_regression_scores)
+importance_regression_scores$Variable[importance_regression_scores$Variable == "Genderm"] <- "Gender"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_1_binaryGood joke"] <- "joke_1_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_2_binaryGood joke"] <- "joke_2_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_3_binaryGood joke"] <- "joke_3_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_4_binaryGood joke"] <- "joke_4_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_5_binaryGood joke"] <- "joke_5_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_6_binaryGood joke"] <- "joke_6_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_7_binaryGood joke"] <- "joke_7_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_8_binaryGood joke"] <- "joke_8_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_9_binaryGood joke"] <- "joke_9_binary"
+importance_regression_scores$Variable[importance_regression_scores$Variable == "joke_10_binaryGood joke"] <- "joke_10_binary"
+
+# remove the sign column from the data
+importance_regression_scores = importance_regression_scores %>% select(- starts_with("Sign"))
+# add an average
+importance_regression_scores["Average"] = rowMeans(importance_regression_scores[,2:11], na.rm = TRUE)
+
+# combine the country importance
+country = importance_regression_scores[str_detect(importance_regression_scores$Variable, "Country"),]
+country = c("Country", apply(country[,2:12], 2, function(x) c(mean(x))))
+# add to dataframe and delete the other 2 rows
+importance_regression_scores[nrow(importance_regression_scores) + 1,] = country
+importance_regression_scores = importance_regression_scores[-c(5,6),]
+
+# make importance numeric and arrange from most important to least important
+importance_regression_scores =  tibble(importance_regression_scores)
+importance_regression_scores[,2:12] =
+  lapply(importance_regression_scores[,2:12], as.numeric)
+importance_regression_scores = importance_regression_scores %>% arrange(desc(Average))
+
+# graph of regression importance
+importance_regression_scores[1:15,] %>% 
+  ggplot(aes(x = reorder(Variable, Average), y = Average)) + 
+  geom_col()  +
+  coord_flip() +
+  theme_bw() +
+  labs(x = "Predictors",
+       y = "Importance in Absolute T-value",
+       title = "Importance ranking of predictors with a linear regression model") 
+
+#ggsave('linear_regression_importance.png')
+```
+
+## logistic regression importance
+
+```{r}
+# change to data frame and rename categorical variables
+importance_classification_scores = data.frame(importance_classification_scores)
+importance_classification_scores$Variable[importance_classification_scores$Variable == "Genderm"] <- "Gender"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_1_binaryGood joke"] <- "joke_1_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_2_binaryGood joke"] <- "joke_2_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_3_binaryGood joke"] <- "joke_3_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_4_binaryGood joke"] <- "joke_4_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_5_binaryGood joke"] <- "joke_5_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_6_binaryGood joke"] <- "joke_6_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_7_binaryGood joke"] <- "joke_7_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_8_binaryGood joke"] <- "joke_8_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_9_binaryGood joke"] <- "joke_9_binary"
+importance_classification_scores$Variable[importance_classification_scores$Variable == "joke_10_binaryGood joke"] <- "joke_10_binary"
+
+# remove the sign column from the data
+importance_classification_scores = importance_classification_scores %>% select(- starts_with("Sign"))
+# add an average
+importance_classification_scores["Average"] = rowMeans(importance_classification_scores[,2:11], na.rm = TRUE)
+
+# combine the country importance
+country = importance_classification_scores[str_detect(importance_classification_scores$Variable, "Country"),]
+country = c("Country", apply(country[,2:12], 2, function(x) c(mean(x))))
+# add to dataframe and delete the other 2 rows
+importance_classification_scores[nrow(importance_classification_scores) + 1,] = country
+importance_classification_scores = importance_classification_scores[-c(1,2),]
+
+# make importance numeric and arrange from most important to least important
+importance_classification_scores =  tibble(importance_classification_scores)
+importance_classification_scores[,2:12] =
+  lapply(importance_classification_scores[,2:12], as.numeric)
+importance_classification_scores = importance_classification_scores %>% arrange(desc(Average))
+
+# graph of regression importance
+importance_classification_scores[1:15,] %>% 
+  ggplot(aes(x = reorder(Variable, Average), y = Average)) + 
+  geom_col()  +
+  coord_flip() +
+  theme_bw() +
+  labs(x = "Predictors",
+       y = "Importance in Absolute T-value",
+       title = "Importance ranking of predictors with a logistic regression model") 
+
+#ggsave('logistic_regression_importance.png')
+```
+
+## combining importance scores for tree regression and classification models
+
+```{r}
+# saving the importance score of the first joke
+importance_regr_scores = importance_tree_regr[[1]][["data"]] %>% dplyr::rename(!!paste('importance_', 1, sep = "") := Importance)
+
+# save importance scores of all jokes
+for (i in 2:10) {
+temp_score = importance_tree_regr[[i]][["data"]] %>%  dplyr::rename(!!paste('importance_', i, sep = "") := Importance)
+importance_regr_scores = importance_regr_scores %>% full_join(temp_score, by = 'Variable')
+}
+
+# saving the importance score of the first joke
+importance_class_scores = importance_tree_class[[1]][["data"]] %>%  dplyr::rename(!!paste('importance_', 1, sep = "") := Importance)
+
+# save importance scores of all jokes
+for (i in 2:10) {
+temp_score = importance_tree_class[[i]][["data"]] %>%  dplyr::rename(!!paste('importance_', i, sep = "") := Importance)
+importance_class_scores = importance_class_scores %>% full_join(temp_score, by = 'Variable')
+}
+```
+
+## tree regression importance
+
+```{r}
+# change to data frame
+importance_regr_scores = data.frame(importance_regr_scores)
+importance_regr_scores$Variable[importance_regr_scores$Variable == "Genderf"] <- "Gender"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_1_binaryBad joke"] <- "joke_1_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_2_binaryBad joke"] <- "joke_2_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_3_binaryBad joke"] <- "joke_3_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_4_binaryBad joke"] <- "joke_4_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_5_binaryBad joke"] <- "joke_5_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_6_binaryBad joke"] <- "joke_6_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_7_binaryBad joke"] <- "joke_7_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_8_binaryBad joke"] <- "joke_8_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_9_binaryBad joke"] <- "joke_9_binary"
+importance_regr_scores$Variable[importance_regr_scores$Variable == "joke_10_binaryBad joke"] <- "joke_10_binary"
+
+# add an average
+importance_regr_scores["Average"] = rowMeans(importance_regr_scores[,2:11], na.rm = TRUE)
+
+# combine the joke and country importance
+country = importance_regr_scores[str_detect(importance_regr_scores$Variable, "Country"),]
+country = c("Country", apply(country[,2:12], 2, function(x) c(mean(x, na.rm = TRUE))))
+# add to dataframe and delete the other rows
+importance_regr_scores[nrow(importance_regr_scores) + 1,] = country
+importance_regr_scores = importance_regr_scores[-c(7,32,78),]
+
+# make importance numeric and arrange from most important to least important
+importance_regr_scores =  tibble(importance_regr_scores)
+importance_regr_scores[,2:12] = lapply(importance_regr_scores[,2:12], as.numeric)
+importance_regr_scores = importance_regr_scores %>% arrange(desc(Average))
+
+# graph of regression importance
+importance_regr_scores[1:15,] %>% 
+  ggplot(aes(x = reorder(Variable, Average), y = Average)) + 
+  geom_col()  +
+  coord_flip() +
+  theme_bw() +
+  labs(x = "Predictors",
+       y = "Importance in sum of squared improvements over all internal nodes",
+       title = "Importance ranking of predictors with a boosted tree regression model") 
+
+#ggsave('tree_regression_importance.png')
+```
+
+## tree classification importance
+
+```{r}
+# change to data frame and rename categorical variables
+importance_class_scores = data.frame(importance_class_scores)
+
+# add an average
+importance_class_scores["Average"] = rowMeans(importance_class_scores[,2:11], na.rm = TRUE)
+
+# combine the country importance
+country = importance_class_scores[str_detect(importance_class_scores$Variable, "Country"),]
+country = c("Country", apply(country[,2:12], 2, function(x) c(mean(x))))
+# add to dataframe and delete the other rows
+importance_class_scores[nrow(importance_class_scores) + 1,] = country
+importance_class_scores = importance_class_scores[-c(3,31,86),]
+
+# combine the gender importance
+gender = importance_class_scores[str_detect(importance_class_scores$Variable, "Gender"),]
+gender = c("Gender", apply(gender[,2:12], 2, function(x) c(mean(as.numeric(x)))))
+# add to dataframe and delete the other rows
+importance_class_scores[nrow(importance_class_scores) + 1,] = gender
+importance_class_scores = importance_class_scores[-c(83,84),]
+
+# combine the binary joke importance
+for (i in 1:10) {
+joke = importance_class_scores[str_detect(importance_class_scores$Variable, paste("joke_", i, "_binary", sep = "")),]
+joke = c(paste("joke_", i, "_binary", sep = ""), apply(joke[,2:12], 2, function(x) c(mean(as.numeric(x, na.rm = TRUE)))))
+# add to dataframe and delete the other rows
+importance_class_scores[nrow(importance_class_scores) + 1,] = joke
+}
+
+# remove the dummy variables
+importance_class_scores = importance_class_scores[-c(3,4,6,8,10,11,14,15,26,27,30,31,34,44,57,59,63,79,83,85),]
+
+# make importance numeric and arrange from most important to least important
+importance_class_scores =  tibble(importance_class_scores)
+importance_class_scores[,2:12] =
+  lapply(importance_class_scores[,2:12], as.numeric)
+importance_class_scores = importance_class_scores %>% arrange(desc(Average))
+
+# graph of regression importance
+importance_class_scores[1:15,] %>% 
+  ggplot(aes(x = reorder(Variable, Average), y = Average)) + 
+  geom_col()  +
+  coord_flip() +
+  theme_bw() +
+  labs(x = "Predictors",
+       y = "Importance in sum of squared improvements over all internal nodes",
+       title = "Importance ranking of predictors with a boosted tree classification model") 
+
+#ggsave('tree_classification_importance.png')
+```
+
+## Model evaluation: accuracy
+
+```{r}
+# combine the data and add joke as a variable
+df_all = data.frame(df_scores_regression,df_scores_tree)
+df_accuracy = data.frame(tree_regression = as.numeric(as.character(df_all$regr_tree_test_acc)),
+                            tree_classification = df_all$class_tree_test_acc,
+                            linear_regression = df_all$regr_test_acc,
+                            logistic_regression = df_all$class_test_acc)
+df_accuracy["jokes"] = as.factor(1:10)
+
+accuracy_pivot = df_accuracy %>% pivot_longer(cols = 1:4,names_to = "model_type", values_to = "Accuracy")
+
+mean = accuracy_pivot %>% 
+group_by(model_type) %>% 
+summarise(mean_val = mean(Accuracy))
+
+information_rate = df_accuracy$class_test_information
+
+accuracy_pivot %>%
+  ggplot(aes(x = jokes, y = Accuracy, colour = model_type)) + 
+  geom_point()  +
+  geom_hline(data = mean, aes(yintercept = mean_val, col = model_type), lty='dashed') +
+#  geom_hline(data = df_accuracy, aes(yintercept = class_test_information, x = jokes), ltw=2) +
+  ylim(0, 1) +
+  theme_bw() +
+  labs(x = "Jokes",
+       y = "Accuracy",
+       title = "Accuracy Scores in Classification Error and R-squared") 
+
+#ggsave('accuracy_plot.png')
+
+
+```
+
+### Computing confidence intervals by bootstrapping from the data
+
+For accuracy models, bootstrapping is done on the test set.
+For importance models, bootstrapping is done on the training set.
+
+## tree models classification
+
+```{r}
+# tree accuracy bootstrap data for confidence intervals
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_class = importance_tree_class[[1]][["data"]]
+colnames(importance_bootstrap_class)[2] =  paste('remove', "_importance", sep = "")
+class_tree_test_bootstrap_acc = rep(NA, 50)
+class_tree_test_bootstrap_auc = rep(NA, 50)
+class_tree_train_bootstrap_acc = rep(NA, 50)
+
+# all jokes
+bootstrap_acc_class_all = list()
+bootstrap_auc_class_all = list()
+bootstrap_vip_class_all = list()
+bootstrap_acc_class_train__all = list()
+
+for (i in 1:10) {
+  
+  data_test_raw = tree_data_class_test_dat[[i]]
+  data_train_raw = tree_data_class_train_dat[[i]]
+  model = model_final_tree_class[[i]]
+  registerDoParallel()
+  
+  for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = sample_n(data_test_raw, nrow(data_test_raw), replace = T)
+    bootstrap_data_train = data_train_raw
+    
+    # pre-processing recipe
+    preprocessing_recipe <- recipe(y ~ ., data = bootstrap_data_train) %>%
+      # convert categorical variables to dummy variables
+      step_string2factor(all_nominal()) %>%
+      # standardize numeric predictors
+      step_rm(r) %>% 
+      step_scale(all_numeric()) %>% 
+      prep()
+    
+    train_bootstrap_processed <- bake(preprocessing_recipe,  new_data = bootstrap_data_train)
+    test_bootstrap_processed  <- bake(preprocessing_recipe, new_data = bootstrap_data_test)
+    
+    tree_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_processed) 
+    
+    # predict the model on the training and test data
+    train_prediction = tree_fit %>%
+      predict(new_data = train_bootstrap_processed) %>%
+      bind_cols(predict(tree_fit, train_bootstrap_processed, type = "prob")) %>% 
+      bind_cols(bootstrap_data_train)
+    
+    test_prediction = tree_fit %>%
+      predict(new_data = test_bootstrap_processed) %>%
+      bind_cols(predict(tree_fit, test_bootstrap_processed, type = "prob")) %>% 
+      bind_cols(bootstrap_data_test)
+    
+    # get model metrics
+    tree_temp_train <- confusionMatrix(train_prediction$.pred_class, as.factor(train_prediction$y))
+    tree_temp_test <- confusionMatrix(test_prediction$.pred_class, as.factor(test_prediction$y))
+    
+    # save importance and accuracy class models
+    
+    # accuracy
+    class_tree_train_bootstrap_acc[j] = tree_temp_train[["overall"]][["Accuracy"]]
+    class_tree_test_bootstrap_acc[j] = tree_temp_test[["overall"]][["Accuracy"]]
+    
+    # auc
+    # class_tree_train_bootstrap_auc[j] = roc_auc(train_prediction, y, ".pred_Bad joke")$.estimate
+    class_tree_test_bootstrap_auc[j] = roc_auc(test_prediction, y, ".pred_Bad joke")$.estimate
+    
+    # importance rankings
+    temp_importance = vip(tree_fit, num_features = 91)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_class = importance_bootstrap_class %>% full_join(temp_importance, by = 'Variable')
+  }
+  
+  print(i)
+  # save statistics per joke
+  bootstrap_acc_class_train__all[[i]] = class_tree_train_bootstrap_acc
+  bootstrap_acc_class_all[[i]] = class_tree_test_bootstrap_acc
+  bootstrap_auc_class_all[[i]] = class_tree_test_bootstrap_auc
+  bootstrap_vip_class_all[[i]] = importance_bootstrap_class
+  
+}
+
+```
+
+## tree models regression
+
+```{r}
+# tree accuracy bootstrap data for confidence intervals
+
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_regr = importance_tree_regr[[1]][["data"]]
+colnames(importance_bootstrap_regr)[2] =  paste('remove', "_importance", sep = "")
+regr_tree_test_bootstrap_acc = rep(NA, 50)
+regr_tree_test_bootstrap_mae = rep(NA, 50)
+regr_tree_test_bootstrap_rmse = rep(NA, 50)
+regr_tree_train_bootstrap_acc = rep(NA, 50)
+
+# all jokes
+bootstrap_acc_regr_all = list()
+bootstrap_mae_regr_all = list()
+bootstrap_rmse_regr_all = list()
+bootstrap_vip_regr_all = list()
+bootstrap_acc_regr_train_all = list()
+
+for (i in 1:10) {
+  
+  data_test_raw = tree_data_regr_test_dat[[i]]
+  data_train_raw = tree_data_regr_train_dat[[i]]
+  model = model_final_tree_regr[[i]]
+  registerDoParallel()
+   
+  for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = sample_n(data_test_raw, nrow(data_test_raw), replace = T)
+    bootstrap_data_train = data_train_raw
+    
+    # pre-processing recipe
+    preprocessing_recipe <- recipe(y ~ ., data = bootstrap_data_train) %>%
+    # convert categorical variables to dummy variables
+    step_string2factor(all_nominal()) %>%
+    # standardize numeric predictors
+    step_rm(r) %>% 
+    step_scale(all_numeric()) %>% 
+    prep()
+    
+    train_bootstrap_processed <- bake(preprocessing_recipe,  new_data = bootstrap_data_train)
+    test_bootstrap_processed  <- bake(preprocessing_recipe, new_data = bootstrap_data_test)
+    
+    tree_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_processed) 
+    
+    # predict the model on the training and test data
+    train_prediction = tree_fit %>%
+      predict(new_data = train_bootstrap_processed) %>%
+      bind_cols(bootstrap_data_train)
+    test_prediction = tree_fit %>%
+      predict(new_data = test_bootstrap_processed) %>%
+      bind_cols(bootstrap_data_test)
+    
+    # get model metrics
+    tree_acc_train <- train_prediction %>%
+      metrics(y, .pred) %>%
+      mutate(.estimate = format(.estimate, big.mark = ","))
+    
+    tree_acc_test <- test_prediction %>%
+      metrics(y, .pred) %>%
+      mutate(.estimate = format(.estimate, big.mark = ","))
+    
+    # save importance and MAE, RMSE and R-squared regr models
+    
+   # mean absolute error
+   # regr_tree_train_bootstrap_mae[j] = tree_acc_train$.estimate[3]
+    regr_tree_test_bootstrap_mae[j] =  tree_acc_test$.estimate[3]
+    # R squared
+    regr_tree_train_bootstrap_acc[j] = tree_acc_train$.estimate[2]
+    regr_tree_test_bootstrap_acc[j] =  tree_acc_test$.estimate[2]
+    # RMSE
+   # regr_tree_train_bootstrap_rmse[j] = tree_acc_train$.estimate[1]
+    regr_tree_test_bootstrap_rmse[j] =  tree_acc_test$.estimate[1]
+   
+    # importance rankings
+    temp_importance = vip(tree_fit, num_features = 91)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_regr = importance_bootstrap_regr %>% full_join(temp_importance, by = 'Variable')
+    
+  }
+  
+  print(i)
+  
+  # save statistics per joke
+  bootstrap_acc_regr_train_all[[i]] = regr_tree_train_bootstrap_acc
+  bootstrap_acc_regr_all[[i]] = regr_tree_test_bootstrap_acc
+  bootstrap_mae_regr_all[[i]] = regr_tree_test_bootstrap_mae
+  bootstrap_rmse_regr_all[[i]] = regr_tree_test_bootstrap_rmse
+  bootstrap_vip_regr_all[[i]] = importance_bootstrap_regr
+}
+
+```
+
+
+## linear regression
+
+```{r}
+# linear accuracy bootstrap data for confidence intervals
+
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_lin = importance_regr[[1]][["data"]]
+colnames(importance_bootstrap_lin)[2] =  paste('remove', "_importance", sep = "")
+lin_test_bootstrap_acc = rep(NA, 50)
+lin_test_bootstrap_rmse = rep(NA, 50)
+lin_test_bootstrap_mae = rep(NA, 50)
+lin_train_bootstrap_acc = rep(NA, 50)
+
+# all jokes
+bootstrap_acc_lin_all = list()
+bootstrap_mae_lin_all = list()
+bootstrap_rmse_lin_all = list()
+bootstrap_vip_lin_all = list()
+bootstrap_acc_train_lin_all = list()
+
+registerDoParallel()
+
+for (i in 1:10) {
+  
+  data_test_raw = lin_data_regr_test[[i]]
+  data_train_raw = lin_data_regr_train[[i]]
+  model = linear_reg() %>% 
+    set_engine('lm') %>%
+    set_mode('regression')
+  
+  
+  for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = sample_n(data_test_raw, nrow(data_test_raw), replace = T)
+    bootstrap_data_train = data_train_raw
+    
+    # recipe
+    recipe_joke = recipe(y ~ ., data = bootstrap_data_train) %>% 
+      step_rm(r) %>% 
+      step_scale(all_numeric())
+    
+    # bake the recipe such that the steps of the recipes are taken into account
+    train_bootstrap_baked <- recipe_joke %>% 
+      prep() %>% 
+      bake(new_data = bootstrap_data_train)
+    
+    joke_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_baked) 
+    
+    # evaluate model on the train data
+    eval_train = augment(joke_fit, bootstrap_data_train)
+    #evaluate model on the test data
+    eval_test = augment(joke_fit, bootstrap_data_test)
+    
+   # get model metrics
+   # mean absolute error
+    # temp_train_mae = mae(eval_train, y, .pred)
+    temp_test_mae = mae(eval_test, y, .pred)
+    # RMSE
+    # temp_train_rmse = rmse(eval_train, y, .pred)
+    temp_test_rmse = rmse(eval_test, y, .pred)
+    # R squared
+    temp_train_acc = rsq(eval_train, y, .pred)
+    temp_test_acc = rsq(eval_test, y, .pred)
+    
+     # save importance and accuracy class models
+    
+    # regr_train_mae[ceiling(i/2)] = temp_train_mae$.estimate
+    lin_test_bootstrap_mae[j] =  temp_test_mae$.estimate
+    # regr_train_rmse[ceiling(i/2)] = temp_train_rmse$.estimate
+    lin_test_bootstrap_rmse[j] = temp_test_rmse$.estimate
+    lin_train_bootstrap_acc[j] = temp_train_acc$.estimate
+    lin_test_bootstrap_acc[j] =  temp_test_acc$.estimate 
+   
+    # importance rankings
+    temp_importance = vip(joke_fit, num_features = 79)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_lin = importance_bootstrap_lin %>% full_join(temp_importance, by = 'Variable')
+    
+    
+  }
+  
+   print(i)
+   
+  # save statistics per joke
+  bootstrap_acc_train_lin_all[[i]] = lin_train_bootstrap_acc
+  bootstrap_acc_lin_all[[i]] = lin_test_bootstrap_acc
+  bootstrap_mae_lin_all[[i]] = lin_test_bootstrap_mae
+  bootstrap_rmse_lin_all[[i]] = lin_test_bootstrap_rmse
+  bootstrap_vip_lin_all[[i]] = importance_bootstrap_lin
+}
+
+
+```
+
+
+## logistic regression
+
+```{r}
+# logistic accuracy bootstrap data for confidence intervals
+
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_log = importance_class[[1]][["data"]]
+colnames(importance_bootstrap_log)[2] =  paste('remove', "_importance", sep = "")
+log_test_bootstrap_acc = rep(NA, 50)
+log_test_bootstrap_auc = rep(NA, 50)
+log_test_bootstrap_info = rep(NA, 50)
+log_train_bootstrap_info = rep(NA, 50)
+log_train_bootstrap_acc = rep(NA, 50)
+
+
+# all jokes
+bootstrap_acc_log_all = list()
+bootstrap_auc_log_all = list()
+bootstrap_vip_log_all = list()
+log_bootstrap_info_all = list()
+log_bootstrap_info_train_all = list()
+bootstrap_acc_log_train_all = list()
+
+registerDoParallel()
+
+for (i in 1:10) {
+  
+  data_test_raw = log_data_class_test[[i]]
+  data_train_raw = log_data_class_train[[i]]
+  model = logistic_reg() %>% 
+      set_engine("glm")
+
+    for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = sample_n(data_test_raw, nrow(data_test_raw), replace = T)
+    bootstrap_data_train = data_train_raw
+    
+    # recipe
+    recipe_joke = recipe(y ~ ., data = bootstrap_data_train) %>% 
+      step_rm(r) %>% 
+      step_scale(all_numeric())
+    
+    # bake the recipe such that the steps of the recipes are taken into account
+    train_bootstrap_baked <- recipe_joke %>% 
+      prep() %>% 
+      bake(new_data = bootstrap_data_train)
+    
+    joke_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_baked) 
+    
+    # evaluate model on the train data
+    eval_train = augment(joke_fit, bootstrap_data_train)
+    #evaluate model on the test data
+    eval_test = augment(joke_fit, bootstrap_data_test)
+    
+    # temporary confusion matrix
+    temp_train = confusionMatrix(eval_train$.pred_class, as.factor(eval_train$y))
+    temp_test = confusionMatrix(eval_test$.pred_class, as.factor(eval_test$y))
+    
+    # save statistics
+    # accuracy
+    log_train_bootstrap_acc[j] = temp_train[["overall"]][["Accuracy"]]
+    log_test_bootstrap_acc[j] = temp_test[["overall"]][["Accuracy"]]
+    # auc
+    # log_train_bootstrap_auc[j] = roc_auc(eval_train, y, ".pred_Bad joke")$.estimate 
+    log_test_bootstrap_auc[j] = roc_auc(eval_test, y, ".pred_Bad joke")$.estimate 
+    log_test_bootstrap_info[j] = temp_test[["overall"]][["AccuracyNull"]]
+    log_train_bootstrap_info[j] = temp_train[["overall"]][["AccuracyNull"]]
+
+    # importance rankings
+    temp_importance = vip(joke_fit, num_features = 79)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_log = importance_bootstrap_log %>% full_join(temp_importance, by = 'Variable')
+    
+  }
+  
+   print(i)
+   
+  # save statistics per joke
+  bootstrap_acc_log_train_all[[i]] = log_train_bootstrap_acc
+  bootstrap_acc_log_all[[i]] = log_test_bootstrap_acc
+  bootstrap_auc_log_all[[i]] = log_test_bootstrap_auc
+  bootstrap_vip_log_all[[i]] = importance_bootstrap_log
+  log_bootstrap_info_train_all[[i]] = log_train_bootstrap_info
+  log_bootstrap_info_all[[i]] = log_test_bootstrap_info
+}
+
+```
+
+
+## transofrming data from lists to dataframes
+
+```{r}
+# make dataframes to save statistics
+# tree classification
+tree_class_acc_df = data.frame(bootstrap_acc_class_all)
+for (i in 1:10) {
+colnames(tree_class_acc_df)[i] = paste('joke_', i, "_acc_tree", sep = "")
+}
+tree_class_auc_df = data.frame(bootstrap_auc_class_all)
+for (i in 1:10) {
+colnames(tree_class_auc_df)[i] = paste('joke_', i, "_auc_tree", sep = "")
+}
+
+# regression tree
+tree_regr_acc_df = data.frame(bootstrap_acc_regr_all)
+for (i in 1:10) {
+colnames(tree_regr_acc_df)[i] = paste('joke_', i, "_R_squared_tree", sep = "")
+}
+tree_regr_mae_df = data.frame(bootstrap_mae_regr_all)
+for (i in 1:10) {
+colnames(tree_regr_mae_df)[i] = paste('joke_', i, "_mae_tree", sep = "")
+}
+tree_regr_rmse_df = data.frame(bootstrap_rmse_regr_all)
+for (i in 1:10) {
+colnames(tree_regr_rmse_df)[i] = paste('joke_', i, "_rmse_tree", sep = "")
+}
+
+# logistic regression
+logistic_acc_df = data.frame(bootstrap_acc_log_all)
+for (i in 1:10) {
+colnames(logistic_acc_df)[i] = paste('joke_', i, "_acc_log", sep = "")
+}
+
+logistic_acc_train_df = data.frame(bootstrap_acc_log_train_all)
+for (i in 1:10) {
+colnames(logistic_acc_train_df)[i] = paste('joke_', i, "_acc_log", sep = "")
+}
+
+logistic_auc_df = data.frame(bootstrap_auc_log_all)
+for (i in 1:10) {
+colnames(logistic_auc_df)[i] = paste('joke_', i, "_auc_log", sep = "")
+}
+
+# linear regression
+linear_acc_df = data.frame(bootstrap_acc_lin_all)
+for (i in 1:10) {
+colnames(linear_acc_df)[i] = paste('joke_', i, "_R_squared_lin", sep = "")
+}
+linear_mae_df = data.frame(bootstrap_mae_lin_all)
+for (i in 1:10) {
+colnames(linear_mae_df)[i] = paste('joke_', i, "_mae_lin", sep = "")
+}
+linear_rmse_df = data.frame(bootstrap_rmse_lin_all)
+for (i in 1:10) {
+colnames(linear_rmse_df)[i] = paste('joke_', i, "_rmse_lin", sep = "")
+}
+
+# information rate
+information_bootstrap_df = data.frame(log_bootstrap_info_all)
+for (i in 1:10) {
+colnames(information_bootstrap_df)[i] = paste('joke_', i, "_information", sep = "")
+}
+
+information_train_bootstrap_df = data.frame(log_bootstrap_info_train_all)
+for (i in 1:10) {
+colnames(information_train_bootstrap_df)[i] = paste('joke_', i, "_information", sep = "")
+}
+
+```
+
+
+## accuracy plot with conf intervals
+
+```{r}
+
+# combine the data and add joke as a variable
+df_accuracy_conf = data.frame(tree_class_acc_df, tree_regr_acc_df, logistic_acc_df, linear_acc_df)
+df_accuracy_conf$joke_1_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_1_R_squared_tree))
+df_accuracy_conf$joke_2_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_2_R_squared_tree))
+df_accuracy_conf$joke_3_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_3_R_squared_tree))
+df_accuracy_conf$joke_4_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_4_R_squared_tree))
+df_accuracy_conf$joke_5_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_5_R_squared_tree))
+df_accuracy_conf$joke_6_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_6_R_squared_tree))
+df_accuracy_conf$joke_7_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_7_R_squared_tree))
+df_accuracy_conf$joke_8_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_8_R_squared_tree))
+df_accuracy_conf$joke_9_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_9_R_squared_tree))
+df_accuracy_conf$joke_10_R_squared_tree = as.numeric(as.character(df_accuracy_conf$joke_10_R_squared_tree))
+
+# combine the data and add joke as a variable
+df_all = data.frame(df_scores_regression,df_scores_tree)
+df_accuracy = data.frame(tree_regression = as.numeric(as.character(df_all$regr_tree_test_acc)),
+                            tree_classification = df_all$class_tree_test_acc,
+                            linear_regression = df_all$regr_test_acc,
+                            logistic_regression = df_all$class_test_acc)
+df_accuracy["jokes"] = as.factor(1:10)
+
+# get confidence intervals
+mean_acc = data.frame(apply(df_accuracy_conf, 2, function(x) mean(x, na.rm = TRUE)))
+acc_lower = data.frame(apply(df_accuracy_conf, 2, function(x) Rfast::nth(as.matrix(x), 2, descending = FALSE, na.rm = TRUE)))
+acc_upper = data.frame(apply(df_accuracy_conf, 2, function(x) Rfast::nth(as.matrix(x), 2, descending = TRUE, na.rm = TRUE)))
+
+# replicate the df such that values can be put in the plot easier
+df_accuracy_new = df_accuracy
+df_accuracy_lower = df_accuracy
+df_accuracy_upper = df_accuracy
+
+# replace the values with the conf interval means
+df_accuracy_new$tree_classification = as.numeric(mean_acc[1:10,1])
+df_accuracy_new$tree_regression = as.numeric(mean_acc[11:20,1])
+df_accuracy_new$logistic_regression = as.numeric(mean_acc[21:30,1])
+df_accuracy_new$linear_regression = as.numeric(mean_acc[31:40,1])
+
+# get a df with the upper and lower scores aswell
+df_accuracy_lower$tree_classification = as.numeric(acc_lower[1:10,1])
+df_accuracy_lower$tree_regression = as.numeric(acc_lower[11:20,1])
+df_accuracy_lower$logistic_regression = as.numeric(acc_lower[21:30,1])
+df_accuracy_lower$linear_regression = as.numeric(acc_lower[31:40,1])
+
+df_accuracy_upper$tree_classification = as.numeric(acc_upper[1:10,1])
+df_accuracy_upper$tree_regression = as.numeric(acc_upper[11:20,1])
+df_accuracy_upper$logistic_regression = as.numeric(acc_upper[21:30,1])
+df_accuracy_upper$linear_regression = as.numeric(acc_upper[31:40,1])
+
+# use pivot top create the accuracy categories
+accuracy_pivot_new = df_accuracy_new %>% pivot_longer(cols = 1:4,names_to = "model_type", values_to = "Accuracy")
+accuracy_pivot_lower = df_accuracy_lower %>% pivot_longer(cols = 1:4,names_to = "model_type", values_to = "Accuracy")
+accuracy_pivot_upper = df_accuracy_upper %>% pivot_longer(cols = 1:4,names_to = "model_type", values_to = "Accuracy")
+
+# change the names 
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "tree_classification"] = "Tree Classification"
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "logistic_regression"] = "Logistic Regression"
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "tree_regression"] = "Tree Regression"
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "linear_regression"] = "Linear Regression"
+
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "tree_classification"] = "Tree Classification"
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "logistic_regression"] = "Logistic Regression"
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "tree_regression"] = "Tree Regression"
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "linear_regression"] = "Linear Regression"
+
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "tree_classification"] = "Tree Classification"
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "logistic_regression"] = "Logistic Regression"
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "tree_regression"] = "Tree Regression"
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "linear_regression"] = "Linear Regression"
+
+# define factors for the order in the legend
+accuracy_pivot_new$model_type = factor(accuracy_pivot_new$model_type, 
+                                  levels=c("Tree Classification",
+                                           "Logistic Regression",
+                                           "Tree Regression",
+                                           "Linear Regression"))
+accuracy_pivot_lower$model_type = factor(accuracy_pivot_lower$model_type, 
+                                  levels=c("Tree Classification",
+                                           "Logistic Regression",
+                                           "Tree Regression",
+                                           "Linear Regression"))
+accuracy_pivot_lower = accuracy_pivot_lower %>% 
+ dplyr::rename("accuracy_lower" = Accuracy)
+
+accuracy_pivot_upper$model_type = factor(accuracy_pivot_upper$model_type, 
+                                  levels=c("Tree Classification",
+                                           "Logistic Regression",
+                                           "Tree Regression",
+                                           "Linear Regression"))
+accuracy_pivot_upper = accuracy_pivot_upper %>% 
+ dplyr::rename("accuracy_upper" = Accuracy)
+
+conf_df = data_frame(accuracy_pivot_lower, 
+               accuracy_upper = accuracy_pivot_upper$accuracy_upper)
+
+# get the mean per category
+mean = accuracy_pivot_new %>% 
+dplyr::group_by(model_type) %>% 
+dplyr::summarise(mean_val = mean(Accuracy))
+
+# get the baseline classification rate to add it to the graph
+information_rate = data.frame(classification_base = class_test_information,
+                              jokes = 1:10)
+
+# incorporate the information rate from loop
+bootstrap_inforate = data.frame(apply(as.matrix(information_bootstrap_df), 2, function(x) mean(x)))
+information_rate$classification_base = as.numeric(bootstrap_inforate[,1])
+
+# split data into regression and classification so the graph can give them the same shape
+regression_pivot_plot = accuracy_pivot_new %>% filter(model_type %in% c('Tree Regression', 'Linear Regression'))
+classification_pivot_plot = accuracy_pivot_new %>% filter(model_type %in% c('Tree Classification', 'Logistic Regression'))
+# lower
+regression_errorbars = conf_df %>% filter(model_type %in% c('Tree Regression', 'Linear Regression'))
+classification_errorbars = conf_df %>% filter(model_type %in% c('Tree Classification', 'Logistic Regression'))
+
+
+# plot the total
+# plot of the averages
+average_accuracy = ggplot() + 
+  geom_hline(data = mean, 
+             aes(yintercept = mean_val, colour = model_type), lty='dashed') +
+  ylim(0, 1) +
+  theme_bw() +
+  labs(x = "Jokes",
+       y = "R-Squared / Accuracy in Proportion",
+       title = "Accuracy Evaluation in Proportion Accuracy and R-squared") +
+  theme(legend.title=element_blank(),
+        legend.position = "none")
+
+# add the accuracies per joke and baseline classification rate
+average_accuracy + 
+  geom_point(data = regression_pivot_plot, 
+             aes(x = jokes, y = Accuracy, colour = model_type), shape = 15,
+             size = 1.8) + 
+  geom_errorbar(data = regression_errorbars, 
+                aes(x = jokes, ymin = accuracy_lower,
+                    ymax = accuracy_upper, colour = model_type),
+               show.legend = FALSE, width = .2) +
+  geom_point(data = classification_pivot_plot, 
+             aes(x = jokes, y = Accuracy, colour = model_type), shape = 18,
+             size = 2.5) +
+  geom_errorbar(data = classification_errorbars, 
+                aes(x = jokes, ymin = accuracy_lower,
+                    ymax = accuracy_upper, colour = model_type),
+                show.legend = FALSE, width = .2) +
+  # add the new information rate?
+  geom_point(data = information_rate, aes(x = jokes, y = classification_base,
+                                          color = "black"),colour = "black", 
+             size = 2.5) +
+  theme_bw() +
+  labs(x = "Jokes",
+       y = "R-Squared / Accuracy in Proportion",
+       title = "Accuracy Evaluation in Proportion Accuracy and R-squared") +
+   guides(color = guide_legend(
+    override.aes=list(shape = 19))) +
+  scale_color_manual(name = "",
+                     breaks = c("Baseline Performance",
+                                "Tree Classification",
+                                "Logistic Regression",
+                                "Tree Regression",
+                                "Linear Regression"),
+                      values = c("Baseline Performance"="black", 
+                               "Tree Regression"="#117733",
+                               "Tree Classification"="red",
+                               "Linear Regression"="blue",
+                               "Logistic Regression"="purple"))
+
+#ggsave('accuracy_conf_13_plot.png')
+
+```
+
+## RMSE and MAE plot with conf intervals
+
+```{r}
+# combine the data and add joke as a variable
+df_accuracy_conf = data.frame(tree_regr_mae_df, tree_regr_rmse_df, linear_mae_df, linear_rmse_df)
+# change variables to numeric
+df_accuracy_conf$joke_1_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_1_mae_tree))
+df_accuracy_conf$joke_2_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_2_mae_tree))
+df_accuracy_conf$joke_3_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_3_mae_tree))
+df_accuracy_conf$joke_4_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_4_mae_tree))
+df_accuracy_conf$joke_5_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_5_mae_tree))
+df_accuracy_conf$joke_6_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_6_mae_tree))
+df_accuracy_conf$joke_7_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_7_mae_tree))
+df_accuracy_conf$joke_8_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_8_mae_tree))
+df_accuracy_conf$joke_9_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_9_mae_tree))
+df_accuracy_conf$joke_10_mae_tree = as.numeric(as.character(df_accuracy_conf$joke_10_mae_tree))
+
+df_accuracy_conf$joke_1_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_1_rmse_tree))
+df_accuracy_conf$joke_2_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_2_rmse_tree))
+df_accuracy_conf$joke_3_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_3_rmse_tree))
+df_accuracy_conf$joke_4_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_4_rmse_tree))
+df_accuracy_conf$joke_5_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_5_rmse_tree))
+df_accuracy_conf$joke_6_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_6_rmse_tree))
+df_accuracy_conf$joke_7_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_7_rmse_tree))
+df_accuracy_conf$joke_8_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_8_rmse_tree))
+df_accuracy_conf$joke_9_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_9_rmse_tree))
+df_accuracy_conf$joke_10_rmse_tree = as.numeric(as.character(df_accuracy_conf$joke_10_rmse_tree))
+
+# combine the data and add joke as a variable
+df_all = data.frame(df_scores_regression,df_scores_tree)
+df_all = data.frame(tree_RMSE= as.numeric(as.character(df_all$regr_tree_test_rmse)),
+                          tree_MAE = as.numeric(as.character(df_all$regr_tree_test_mae)),
+                          linear_RMSE = df_all$regr_test_rmse,
+                          linear_MAE = df_all$regr_test_mae)
+
+df_all["jokes"] = as.factor(1:10)
+
+# get confidence intervals
+mean_acc = data.frame(apply(df_accuracy_conf, 2, function(x) mean(x, na.rm = TRUE)))
+acc_lower = data.frame(apply(df_accuracy_conf, 2, function(x) Rfast::nth(as.matrix(x), 2, descending = FALSE, na.rm = TRUE)))
+acc_upper = data.frame(apply(df_accuracy_conf, 2, function(x) Rfast::nth(as.matrix(x), 2, descending = TRUE, na.rm = TRUE)))
+
+# replicate the df such that values can be put in the plot easier
+df_accuracy_new = df_all
+df_accuracy_lower = df_all
+df_accuracy_upper = df_all
+
+# replace the values with the conf interval means
+df_accuracy_new$tree_MAE = as.numeric(mean_acc[1:10,1])
+df_accuracy_new$tree_RMSE = as.numeric(mean_acc[11:20,1])
+df_accuracy_new$linear_MAE = as.numeric(mean_acc[21:30,1])
+df_accuracy_new$linear_RMSE = as.numeric(mean_acc[31:40,1])
+
+# get a df with the upper and lower scores aswell
+df_accuracy_lower$tree_MAE = as.numeric(acc_lower[1:10,1])
+df_accuracy_lower$tree_RMSE = as.numeric(acc_lower[11:20,1])
+df_accuracy_lower$linear_MAE = as.numeric(acc_lower[21:30,1])
+df_accuracy_lower$linear_RMSE = as.numeric(acc_lower[31:40,1])
+
+df_accuracy_upper$tree_MAE = as.numeric(acc_upper[1:10,1])
+df_accuracy_upper$tree_RMSE = as.numeric(acc_upper[11:20,1])
+df_accuracy_upper$linear_MAE = as.numeric(acc_upper[21:30,1])
+df_accuracy_upper$linear_RMSE = as.numeric(acc_upper[31:40,1])
+
+# use pivot top create the accuracy categories
+accuracy_pivot_new = df_accuracy_new %>% pivot_longer(cols = 1:4,names_to = "model_type", values_to = "Metrics")
+accuracy_pivot_lower = df_accuracy_lower %>% pivot_longer(cols = 1:4,names_to = "model_type", values_to = "Metrics")
+accuracy_pivot_upper = df_accuracy_upper %>% pivot_longer(cols = 1:4,names_to = "model_type", values_to = "Metrics")
+
+# change the names 
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "tree_RMSE"] = "Tree RMSE"
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "tree_MAE"] = "Tree MAE"
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "linear_RMSE"] = "Linear RMSE"
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "linear_MAE"] = "Linear MAE"
+
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "tree_RMSE"] = "Tree RMSE"
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "tree_MAE"] = "Tree MAE"
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "linear_RMSE"] = "Linear RMSE"
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "linear_MAE"] = "Linear MAE"
+
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "tree_RMSE"] = "Tree RMSE"
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "tree_MAE"] = "Tree MAE"
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "linear_RMSE"] = "Linear RMSE"
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "linear_MAE"] = "Linear MAE"
+
+# define factors for the order in the legend
+accuracy_pivot_new$model_type = factor(accuracy_pivot_new$model_type, 
+                                  levels=c("Tree RMSE",
+                                           "Linear RMSE",
+                                           "Tree MAE",
+                                           "Linear MAE"))
+accuracy_pivot_lower$model_type = factor(accuracy_pivot_lower$model_type, 
+                                  levels=c("Tree RMSE",
+                                           "Linear RMSE",
+                                           "Tree MAE",
+                                           "Linear MAE"))
+
+accuracy_pivot_lower = accuracy_pivot_lower %>% 
+ dplyr::rename("accuracy_lower" = Metrics)
+
+accuracy_pivot_upper$model_type = factor(accuracy_pivot_upper$model_type, 
+                                  levels=c("Tree RMSE",
+                                           "Linear RMSE",
+                                           "Tree MAE",
+                                           "Linear MAE"))
+
+accuracy_pivot_upper = accuracy_pivot_upper %>% 
+ dplyr::rename("accuracy_upper" = Metrics)
+
+conf_df = data_frame(accuracy_pivot_lower, 
+               accuracy_upper = accuracy_pivot_upper$accuracy_upper)
+
+# get the mean per category
+mean = accuracy_pivot_new %>% 
+dplyr::group_by(model_type) %>% 
+dplyr::summarise(mean_val = mean(Metrics))
+
+
+
+# plot the total
+# plot of the averages
+average_accuracy = ggplot() + 
+  geom_hline(data = mean, 
+             aes(yintercept = mean_val, colour = model_type), lty='dashed') +
+  ylim(0, 4) +
+  theme_bw() +
+  labs(x = "Jokes",
+       y = "RMSE / MAE",
+       title = "Accuracy Evaluation in RMSE Accuracy and MAE") +
+  theme(legend.title=element_blank(),
+        legend.position = "none")
+
+# add the accuracies per joke and baseline classification rate
+average_accuracy + 
+  geom_point(data = accuracy_pivot_new, 
+             aes(x = jokes, y = Metrics, colour = model_type),
+             size = 2) + 
+  geom_errorbar(data = conf_df, 
+                aes(x = jokes, ymin = accuracy_lower,
+                    ymax = accuracy_upper, colour = model_type),
+                show.legend = FALSE, width = .2) +
+  theme_bw() +
+  labs(x = "Jokes",
+       y = "RMSE / MAE",
+       title = "Accuracy Evaluation in RMSE Accuracy and MAE") +
+  scale_color_manual(name = "",
+                     breaks = c("Tree RMSE",
+                                "Linear RMSE",
+                                "Tree MAE",
+                                "Linear MAE"),
+                      values = c("Tree RMSE"="#117733",
+                               "Linear RMSE"="red",
+                               "Tree MAE"="blue",
+                               "Linear MAE"="purple"))
+
+#ggsave('accuracy_RMSE_conf_1_plot.png')
+
+```
+
+
+## AUC plot with conf intervals
+
+```{r}
+# combine the data and add joke as a variable
+df_accuracy_conf = data.frame(logistic_auc_df, tree_class_auc_df)
+
+# combine the data and add joke as a variable
+df_all = data.frame(df_scores_regression,df_scores_tree)
+df_all = data.frame(tree_AUC = df_all$class_tree_test_auc,
+                    log_AUC = df_all$class_test_acc)
+df_all["jokes"] = as.factor(1:10)
+
+# get confidence intervals
+mean_acc = data.frame(apply(df_accuracy_conf, 2, function(x) mean(x, na.rm = TRUE)))
+acc_lower = data.frame(apply(df_accuracy_conf, 2, function(x) Rfast::nth(as.matrix(x), 2, descending = FALSE, na.rm = TRUE)))
+acc_upper = data.frame(apply(df_accuracy_conf, 2, function(x) Rfast::nth(as.matrix(x), 2, descending = TRUE, na.rm = TRUE)))
+
+# replicate the df such that values can be put in the plot easier
+df_accuracy_new = df_all
+df_accuracy_lower = df_all
+df_accuracy_upper = df_all
+
+# replace the values with the conf interval means
+df_accuracy_new$log_AUC = as.numeric(mean_acc[1:10,1])
+df_accuracy_new$tree_AUC = as.numeric(mean_acc[11:20,1])
+
+# get a df with the upper and lower scores aswell
+df_accuracy_lower$log_AUC = as.numeric(acc_lower[1:10,1])
+df_accuracy_lower$tree_AUC = as.numeric(acc_lower[11:20,1])
+
+df_accuracy_upper$log_AUC = as.numeric(acc_upper[1:10,1])
+df_accuracy_upper$tree_AUC = as.numeric(acc_upper[11:20,1])
+
+# use pivot top create the accuracy categories
+accuracy_pivot_new = df_accuracy_new %>% pivot_longer(cols = 1:2,names_to = "model_type", values_to = "Metrics")
+accuracy_pivot_lower = df_accuracy_lower %>% pivot_longer(cols = 1:2,names_to = "model_type", values_to = "Metrics")
+accuracy_pivot_upper = df_accuracy_upper %>% pivot_longer(cols = 1:2,names_to = "model_type", values_to = "Metrics")
+
+# change the names 
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "log_AUC"] = "Logistic Regression"
+accuracy_pivot_new$model_type[accuracy_pivot_new$model_type == "tree_AUC"] = "Tree Classification"
+
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "log_AUC"] = "Logistic Regression"
+accuracy_pivot_lower$model_type[accuracy_pivot_lower$model_type == "tree_AUC"] = "Tree Classification"
+
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "log_AUC"] = "Logistic Regression"
+accuracy_pivot_upper$model_type[accuracy_pivot_upper$model_type == "tree_AUC"] = "Tree Classification"
+
+
+# define factors for the order in the legend
+accuracy_pivot_new$model_type = factor(accuracy_pivot_new$model_type, 
+                                  levels=c("Tree Classification",
+                                           "Logistic Regression"))
+
+accuracy_pivot_lower$model_type = factor(accuracy_pivot_lower$model_type, 
+                                  levels=c("Tree Classification",
+                                           "Logistic Regression"))
+
+accuracy_pivot_lower = accuracy_pivot_lower %>% 
+ dplyr::rename("accuracy_lower" = Metrics)
+
+accuracy_pivot_upper$model_type = factor(accuracy_pivot_upper$model_type, 
+                                  levels=c("Tree Classification",
+                                           "Logistic Regression"))
+
+accuracy_pivot_upper = accuracy_pivot_upper %>% 
+ dplyr::rename("accuracy_upper" = Metrics)
+
+conf_df = data_frame(accuracy_pivot_lower, 
+               accuracy_upper = accuracy_pivot_upper$accuracy_upper)
+
+# get the mean per category
+mean = accuracy_pivot_new %>% 
+dplyr::group_by(model_type) %>% 
+dplyr::summarise(mean_val = mean(Metrics))
+
+
+
+# plot the total
+# plot of the averages
+average_accuracy = ggplot() + 
+  geom_hline(data = mean, 
+             aes(yintercept = mean_val, colour = model_type), lty='dashed') +
+  ylim(0, 1) +
+  theme_bw() +
+  labs(x = "Jokes",
+       y = "AUC",
+       title = "Accuracy Evaluation in AUC") +
+  theme(legend.title=element_blank(),
+        legend.position = "none")
+
+# add the accuracies per joke and baseline classification rate
+average_accuracy + 
+  geom_point(data = accuracy_pivot_new, 
+             aes(x = jokes, y = Metrics, colour = model_type),
+             size = 2) + 
+  geom_errorbar(data = conf_df, 
+                aes(x = jokes, ymin = accuracy_lower,
+                    ymax = accuracy_upper, colour = model_type),
+                show.legend = FALSE, width = .2) +
+  theme_bw() +
+  labs(x = "Jokes",
+       y = "AUC",
+       title = "Accuracy Evaluation in AUC") +
+  scale_color_manual(name = "",
+                     breaks = c("Tree Classification",
+                                "Logistic Regression"),
+                      values = c("Tree Classification"="blue",
+                                 "Logistic Regression"="purple"))
+
+#ggsave('accuracy_AUC_conf_1_plot.png')
+
+```
+
+
+# For importance models, bootstrapping is done by bootstrapping on the training set
+
+## tree models classification
+
+```{r}
+# tree accuracy bootstrap data for confidence intervals
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_class = importance_tree_class[[1]][["data"]]
+colnames(importance_bootstrap_class)[2] =  paste('remove', "_importance", sep = "")
+class_tree_test_bootstrap_acc = rep(NA, 50)
+class_tree_test_bootstrap_auc = rep(NA, 50)
+class_tree_train_bootstrap_acc = rep(NA, 50)
+
+# all jokes
+bootstrap_acc_class_all = list()
+bootstrap_auc_class_all = list()
+bootstrap_vip_class_all = list()
+bootstrap_acc_class_train__all = list()
+
+for (i in 1:10) {
+  
+  data_test_raw = tree_data_class_test_dat[[i]]
+  data_train_raw = tree_data_class_train_dat[[i]]
+  model = model_final_tree_class[[i]]
+  registerDoParallel()
+  
+  for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = data_test_raw
+    bootstrap_data_train = sample_n(data_train_raw, nrow(data_train_raw), replace = T)
+    
+    # pre-processing recipe
+    preprocessing_recipe <- recipe(y ~ ., data = bootstrap_data_train) %>%
+      # convert categorical variables to dummy variables
+      step_string2factor(all_nominal()) %>%
+      # standardize numeric predictors
+      step_rm(r) %>% 
+      step_scale(all_numeric()) %>% 
+      prep()
+    
+    train_bootstrap_processed <- bake(preprocessing_recipe,  new_data = bootstrap_data_train)
+    test_bootstrap_processed  <- bake(preprocessing_recipe, new_data = bootstrap_data_test)
+    
+    tree_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_processed) 
+    
+    # predict the model on the training and test data
+    train_prediction = tree_fit %>%
+      predict(new_data = train_bootstrap_processed) %>%
+      bind_cols(predict(tree_fit, train_bootstrap_processed, type = "prob")) %>% 
+      bind_cols(bootstrap_data_train)
+    
+    test_prediction = tree_fit %>%
+      predict(new_data = test_bootstrap_processed) %>%
+      bind_cols(predict(tree_fit, test_bootstrap_processed, type = "prob")) %>% 
+      bind_cols(bootstrap_data_test)
+    
+    # get model metrics
+    tree_temp_train <- confusionMatrix(train_prediction$.pred_class, as.factor(train_prediction$y))
+    tree_temp_test <- confusionMatrix(test_prediction$.pred_class, as.factor(test_prediction$y))
+    
+    # save importance and accuracy class models
+    
+    # accuracy
+    class_tree_train_bootstrap_acc[j] = tree_temp_train[["overall"]][["Accuracy"]]
+    class_tree_test_bootstrap_acc[j] = tree_temp_test[["overall"]][["Accuracy"]]
+    
+    # auc
+    # class_tree_train_bootstrap_auc[j] = roc_auc(train_prediction, y, ".pred_Bad joke")$.estimate
+    class_tree_test_bootstrap_auc[j] = roc_auc(test_prediction, y, ".pred_Bad joke")$.estimate
+    
+    # importance rankings
+    temp_importance = vip(tree_fit, num_features = 91)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_class = importance_bootstrap_class %>% full_join(temp_importance, by = 'Variable')
+  }
+  
+  print(i)
+  # save statistics per joke
+  bootstrap_acc_class_train__all[[i]] = class_tree_train_bootstrap_acc
+  bootstrap_acc_class_all[[i]] = class_tree_test_bootstrap_acc
+  bootstrap_auc_class_all[[i]] = class_tree_test_bootstrap_auc
+  bootstrap_vip_class_all[[i]] = importance_bootstrap_class
+  
+}
+
+```
+
+## tree models regression
+
+```{r}
+# tree accuracy bootstrap data for confidence intervals
+
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_regr = importance_tree_regr[[1]][["data"]]
+colnames(importance_bootstrap_regr)[2] =  paste('remove', "_importance", sep = "")
+regr_tree_test_bootstrap_acc = rep(NA, 50)
+regr_tree_test_bootstrap_mae = rep(NA, 50)
+regr_tree_test_bootstrap_rmse = rep(NA, 50)
+regr_tree_train_bootstrap_acc = rep(NA, 50)
+
+# all jokes
+bootstrap_acc_regr_all = list()
+bootstrap_mae_regr_all = list()
+bootstrap_rmse_regr_all = list()
+bootstrap_vip_regr_all = list()
+bootstrap_acc_regr_train_all = list()
+
+for (i in 1:10) {
+  
+  data_test_raw = tree_data_regr_test_dat[[i]]
+  data_train_raw = tree_data_regr_train_dat[[i]]
+  model = model_final_tree_regr[[i]]
+  registerDoParallel()
+   
+  for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = data_test_raw
+    bootstrap_data_train = sample_n(data_train_raw, nrow(data_train_raw), replace = T)
+    
+    # pre-processing recipe
+    preprocessing_recipe <- recipe(y ~ ., data = bootstrap_data_train) %>%
+    # convert categorical variables to dummy variables
+    step_string2factor(all_nominal()) %>%
+    # standardize numeric predictors
+    step_rm(r) %>% 
+    step_scale(all_numeric()) %>% 
+    prep()
+    
+    train_bootstrap_processed <- bake(preprocessing_recipe,  new_data = bootstrap_data_train)
+    test_bootstrap_processed  <- bake(preprocessing_recipe, new_data = bootstrap_data_test)
+    
+    tree_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_processed) 
+    
+    # predict the model on the training and test data
+    train_prediction = tree_fit %>%
+      predict(new_data = train_bootstrap_processed) %>%
+      bind_cols(bootstrap_data_train)
+    test_prediction = tree_fit %>%
+      predict(new_data = test_bootstrap_processed) %>%
+      bind_cols(bootstrap_data_test)
+    
+    # get model metrics
+    tree_acc_train <- train_prediction %>%
+      metrics(y, .pred) %>%
+      mutate(.estimate = format(.estimate, big.mark = ","))
+    
+    tree_acc_test <- test_prediction %>%
+      metrics(y, .pred) %>%
+      mutate(.estimate = format(.estimate, big.mark = ","))
+    
+    # save importance and MAE, RMSE and R-squared regr models
+    
+   # mean absolute error
+   # regr_tree_train_bootstrap_mae[j] = tree_acc_train$.estimate[3]
+    regr_tree_test_bootstrap_mae[j] =  tree_acc_test$.estimate[3]
+    # R squared
+    regr_tree_train_bootstrap_acc[j] = tree_acc_train$.estimate[2]
+    regr_tree_test_bootstrap_acc[j] =  tree_acc_test$.estimate[2]
+    # RMSE
+   # regr_tree_train_bootstrap_rmse[j] = tree_acc_train$.estimate[1]
+    regr_tree_test_bootstrap_rmse[j] =  tree_acc_test$.estimate[1]
+   
+    # importance rankings
+    temp_importance = vip(tree_fit, num_features = 91)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_regr = importance_bootstrap_regr %>% full_join(temp_importance, by = 'Variable')
+    
+  }
+  
+  print(i)
+  
+  # save statistics per joke
+  bootstrap_acc_regr_train_all[[i]] = regr_tree_train_bootstrap_acc
+  bootstrap_acc_regr_all[[i]] = regr_tree_test_bootstrap_acc
+  bootstrap_mae_regr_all[[i]] = regr_tree_test_bootstrap_mae
+  bootstrap_rmse_regr_all[[i]] = regr_tree_test_bootstrap_rmse
+  bootstrap_vip_regr_all[[i]] = importance_bootstrap_regr
+}
+
+```
+
+
+## linear regression
+
+```{r}
+# linear accuracy bootstrap data for confidence intervals
+
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_lin = importance_regr[[1]][["data"]]
+colnames(importance_bootstrap_lin)[2] =  paste('remove', "_importance", sep = "")
+lin_test_bootstrap_acc = rep(NA, 50)
+lin_test_bootstrap_rmse = rep(NA, 50)
+lin_test_bootstrap_mae = rep(NA, 50)
+lin_train_bootstrap_acc = rep(NA, 50)
+
+# all jokes
+bootstrap_acc_lin_all = list()
+bootstrap_mae_lin_all = list()
+bootstrap_rmse_lin_all = list()
+bootstrap_vip_lin_all = list()
+bootstrap_acc_train_lin_all = list()
+
+registerDoParallel()
+
+for (i in 1:10) {
+  
+  data_test_raw = lin_data_regr_test[[i]]
+  data_train_raw = lin_data_regr_train[[i]]
+  model = linear_reg() %>% 
+    set_engine('lm') %>%
+    set_mode('regression')
+  
+  
+  for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = data_test_raw
+    bootstrap_data_train = sample_n(data_train_raw, nrow(data_train_raw), replace = T)
+    
+    # recipe
+    recipe_joke = recipe(y ~ ., data = bootstrap_data_train) %>% 
+      step_rm(r) %>% 
+      step_scale(all_numeric())
+    
+    # bake the recipe such that the steps of the recipes are taken into account
+    train_bootstrap_baked <- recipe_joke %>% 
+      prep() %>% 
+      bake(new_data = bootstrap_data_train)
+    
+    joke_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_baked) 
+    
+    # evaluate model on the train data
+    eval_train = augment(joke_fit, bootstrap_data_train)
+    #evaluate model on the test data
+    eval_test = augment(joke_fit, bootstrap_data_test)
+    
+   # get model metrics
+   # mean absolute error
+    # temp_train_mae = mae(eval_train, y, .pred)
+    temp_test_mae = mae(eval_test, y, .pred)
+    # RMSE
+    # temp_train_rmse = rmse(eval_train, y, .pred)
+    temp_test_rmse = rmse(eval_test, y, .pred)
+    # R squared
+    temp_train_acc = rsq(eval_train, y, .pred)
+    temp_test_acc = rsq(eval_test, y, .pred)
+    
+     # save importance and accuracy class models
+    
+    # regr_train_mae[ceiling(i/2)] = temp_train_mae$.estimate
+    lin_test_bootstrap_mae[j] =  temp_test_mae$.estimate
+    # regr_train_rmse[ceiling(i/2)] = temp_train_rmse$.estimate
+    lin_test_bootstrap_rmse[j] = temp_test_rmse$.estimate
+    lin_train_bootstrap_acc[j] = temp_train_acc$.estimate
+    lin_test_bootstrap_acc[j] =  temp_test_acc$.estimate 
+   
+    # importance rankings
+    temp_importance = vip(joke_fit, num_features = 79)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_lin = importance_bootstrap_lin %>% full_join(temp_importance, by = 'Variable')
+    
+    
+  }
+  
+   print(i)
+   
+  # save statistics per joke
+  bootstrap_acc_train_lin_all[[i]] = lin_train_bootstrap_acc
+  bootstrap_acc_lin_all[[i]] = lin_test_bootstrap_acc
+  bootstrap_mae_lin_all[[i]] = lin_test_bootstrap_mae
+  bootstrap_rmse_lin_all[[i]] = lin_test_bootstrap_rmse
+  bootstrap_vip_lin_all[[i]] = importance_bootstrap_lin
+}
+
+
+```
+
+
+## logistic regression
+
+```{r}
+# logistic accuracy bootstrap data for confidence intervals
+
+# making empty variables to store information
+# create a first Vip score that can be added to, will be removed after
+importance_bootstrap_log = importance_class[[1]][["data"]]
+colnames(importance_bootstrap_log)[2] =  paste('remove', "_importance", sep = "")
+log_test_bootstrap_acc = rep(NA, 50)
+log_test_bootstrap_auc = rep(NA, 50)
+log_test_bootstrap_info = rep(NA, 50)
+log_train_bootstrap_info = rep(NA, 50)
+log_train_bootstrap_acc = rep(NA, 50)
+
+
+# all jokes
+bootstrap_acc_log_all = list()
+bootstrap_auc_log_all = list()
+bootstrap_vip_log_all = list()
+log_bootstrap_info_all = list()
+log_bootstrap_info_train_all = list()
+bootstrap_acc_log_train_all = list()
+
+registerDoParallel()
+
+for (i in 1:10) {
+  
+  data_test_raw = log_data_class_test[[i]]
+  data_train_raw = log_data_class_train[[i]]
+  model = logistic_reg() %>% 
+      set_engine("glm")
+
+    for (j in 1:50) {
+    set.seed(j)
+    bootstrap_data_test = data_test_raw
+    bootstrap_data_train = sample_n(data_train_raw, nrow(data_train_raw), replace = T)
+    
+    # recipe
+    recipe_joke = recipe(y ~ ., data = bootstrap_data_train) %>% 
+      step_rm(r) %>% 
+      step_scale(all_numeric())
+    
+    # bake the recipe such that the steps of the recipes are taken into account
+    train_bootstrap_baked <- recipe_joke %>% 
+      prep() %>% 
+      bake(new_data = bootstrap_data_train)
+    
+    joke_fit = model %>%
+      fit(formula = y ~ ., data = train_bootstrap_baked) 
+    
+    # evaluate model on the train data
+    eval_train = augment(joke_fit, bootstrap_data_train)
+    #evaluate model on the test data
+    eval_test = augment(joke_fit, bootstrap_data_test)
+    
+    # temporary confusion matrix
+    temp_train = confusionMatrix(eval_train$.pred_class, as.factor(eval_train$y))
+    temp_test = confusionMatrix(eval_test$.pred_class, as.factor(eval_test$y))
+    
+    # save statistics
+    # accuracy
+    log_train_bootstrap_acc[j] = temp_train[["overall"]][["Accuracy"]]
+    log_test_bootstrap_acc[j] = temp_test[["overall"]][["Accuracy"]]
+    # auc
+    # log_train_bootstrap_auc[j] = roc_auc(eval_train, y, ".pred_Bad joke")$.estimate 
+    log_test_bootstrap_auc[j] = roc_auc(eval_test, y, ".pred_Bad joke")$.estimate 
+    log_test_bootstrap_info[j] = temp_test[["overall"]][["AccuracyNull"]]
+    log_train_bootstrap_info[j] = temp_train[["overall"]][["AccuracyNull"]]
+
+    # importance rankings
+    temp_importance = vip(joke_fit, num_features = 79)
+    temp_importance = temp_importance[["data"]]
+    colnames(temp_importance)[2] = paste('importance_', i,"_", j, sep = "")
+    importance_bootstrap_log = importance_bootstrap_log %>% full_join(temp_importance, by = 'Variable')
+    
+  }
+  
+   print(i)
+   
+  # save statistics per joke
+  bootstrap_acc_log_train_all[[i]] = log_train_bootstrap_acc
+  bootstrap_acc_log_all[[i]] = log_test_bootstrap_acc
+  bootstrap_auc_log_all[[i]] = log_test_bootstrap_auc
+  bootstrap_vip_log_all[[i]] = importance_bootstrap_log
+  log_bootstrap_info_train_all[[i]] = log_train_bootstrap_info
+  log_bootstrap_info_all[[i]] = log_test_bootstrap_info
+}
+
+```
+
+
+## importance plot with conf intervals: data prep
+
+
+```{r}
+# get all the importance scores in a df
+tree_class_imp = bootstrap_vip_class_all[[10]][,c(1,3:502)]
+tree_regr_imp = bootstrap_vip_regr_all[[10]][,c(1,3:502)]
+lin_regr_imp = bootstrap_vip_lin_all[[10]] %>% dplyr::select(c(Variable, starts_with("impor")))
+log_regr_imp = bootstrap_vip_log_all[[10]] %>% dplyr::select(c(Variable, starts_with("impor")))
+
+# make duplicates so original datasets can still be looked at
+tree_class_imp_prep = data.frame(tree_class_imp)
+tree_regr_imp_prep = data.frame(tree_regr_imp)
+lin_regr_imp_prep = data.frame(lin_regr_imp)
+log_regr_imp_prep = data.frame(log_regr_imp)
+
+
+# linear regression
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "Genderm"] <- "Gender"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_1_binaryGood joke"] <- "joke_1_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_2_binaryGood joke"] <- "joke_2_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_3_binaryGood joke"] <- "joke_3_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_4_binaryGood joke"] <- "joke_4_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_5_binaryGood joke"] <- "joke_5_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_6_binaryGood joke"] <- "joke_6_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_7_binaryGood joke"] <- "joke_7_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_8_binaryGood joke"] <- "joke_8_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_9_binaryGood joke"] <- "joke_9_binary"
+lin_regr_imp_prep$Variable[lin_regr_imp_prep$Variable == "joke_10_binaryGood joke"] <- "joke_10_binary"
+
+# combine the joke and country importance
+country = lin_regr_imp_prep[str_detect(lin_regr_imp_prep$Variable, "Country"),]
+country = c("Country", apply(country[,2:501], 2, function(x) c(mean(x, na.rm = TRUE))))
+# add to dataframe and delete the other rows
+lin_regr_imp_prep[nrow(lin_regr_imp_prep) + 1,] = country
+lin_regr_imp_prep = lin_regr_imp_prep[-c(5,6),]
+
+# make importance numeric
+lin_regr_imp_prep =  tibble(lin_regr_imp_prep)
+lin_regr_imp_prep[,2:501] = lapply(lin_regr_imp_prep[,2:501], as.numeric)
+
+# tree regression
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "Genderf"] <- "Gender"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_1_binaryBad joke"] <- "joke_1_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_2_binaryBad joke"] <- "joke_2_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_3_binaryBad joke"] <- "joke_3_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_4_binaryBad joke"] <- "joke_4_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_5_binaryBad joke"] <- "joke_5_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_6_binaryBad joke"] <- "joke_6_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_7_binaryBad joke"] <- "joke_7_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_8_binaryBad joke"] <- "joke_8_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_9_binaryBad joke"] <- "joke_9_binary"
+tree_regr_imp_prep$Variable[tree_regr_imp_prep$Variable == "joke_10_binaryBad joke"] <- "joke_10_binary"
+
+# combine the joke and country importance
+country = tree_regr_imp_prep[str_detect(tree_regr_imp_prep$Variable, "Country"),]
+country = c("Country", apply(country[,2:501], 2, function(x) c(mean(x, na.rm = TRUE))))
+# add to dataframe and delete the other rows
+tree_regr_imp_prep[nrow(tree_regr_imp_prep) + 1,] = country
+tree_regr_imp_prep = tree_regr_imp_prep[-c(7,31,66),]
+
+# make importance numeric
+tree_regr_imp_prep =  tibble(tree_regr_imp_prep)
+tree_regr_imp_prep[,2:501] = lapply(tree_regr_imp_prep[,2:501], as.numeric)
+
+
+# logistic regression
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "Genderm"] <- "Gender"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_1_binaryGood joke"] <- "joke_1_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_2_binaryGood joke"] <- "joke_2_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_3_binaryGood joke"] <- "joke_3_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_4_binaryGood joke"] <- "joke_4_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_5_binaryGood joke"] <- "joke_5_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_6_binaryGood joke"] <- "joke_6_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_7_binaryGood joke"] <- "joke_7_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_8_binaryGood joke"] <- "joke_8_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_9_binaryGood joke"] <- "joke_9_binary"
+log_regr_imp_prep$Variable[log_regr_imp_prep$Variable == "joke_10_binaryGood joke"] <- "joke_10_binary"
+
+# combine the joke and country importance
+country = log_regr_imp_prep[str_detect(log_regr_imp_prep$Variable, "Country"),]
+country = c("Country", apply(country[,2:501], 2, function(x) c(mean(x, na.rm = TRUE))))
+# add to dataframe and delete the other rows
+log_regr_imp_prep[nrow(log_regr_imp_prep) + 1,] = country
+log_regr_imp_prep = log_regr_imp_prep[-c(1,3),]
+
+# make importance numeric
+log_regr_imp_prep =  tibble(log_regr_imp_prep)
+log_regr_imp_prep[,2:501] = lapply(log_regr_imp_prep[,2:501], as.numeric)
+
+
+# Tree Classification
+# combine the country importance
+country = tree_class_imp_prep[str_detect(tree_class_imp_prep$Variable, "Country"),]
+country = c("Country", apply(country[,2:501], 2, function(x) c(mean(x))))
+# add to dataframe and delete the other rows
+tree_class_imp_prep[nrow(tree_class_imp_prep) + 1,] = country
+tree_class_imp_prep = tree_class_imp_prep[-c(4,42,87),]
+
+# combine the gender importance
+gender = tree_class_imp_prep[str_detect(tree_class_imp_prep$Variable, "Gender"),]
+gender = c("Gender", apply(gender[,2:501], 2, function(x) c(mean(as.numeric(x)))))
+# add to dataframe and delete the other rows
+tree_class_imp_prep[nrow(tree_class_imp_prep) + 1,] = gender
+tree_class_imp_prep = tree_class_imp_prep[-c(74,85),]
+
+# combine the binary joke importance
+for (i in 1:10) {
+joke = tree_class_imp_prep[str_detect(tree_class_imp_prep$Variable, paste("joke_", i, "_binary", sep = "")),]
+joke = c(paste("joke_", i, "_binary", sep = ""), apply(joke[,2:501], 2, function(x) c(max(as.numeric(x, na.rm = TRUE)))))
+# add to dataframe and delete the other rows
+tree_class_imp_prep[nrow(tree_class_imp_prep) + 1,] = joke
+}
+
+# remove the dummy variables
+tree_class_imp_prep = tree_class_imp_prep[-c(6,7,10,11,19,21,26,27,31,32,34,61,68,70,73,78,82,83,85,86),]
+
+# make importance numeric
+tree_class_imp_prep =  tibble(tree_class_imp_prep)
+tree_class_imp_prep[,2:501] = lapply(tree_class_imp_prep[,2:501], as.numeric)
+
+```
+
+## ranking
+
+```{r}
+# rank per columns the values of importance
+# first make duplicates of prepped data for ranking
+tree_class_imp_rank = tree_class_imp_prep
+log_regr_imp_rank = log_regr_imp_prep
+tree_regr_imp_rank = tree_regr_imp_prep
+lin_regr_imp_rank = lin_regr_imp_prep
+
+# rank variables on their importance scores
+lin_regr_imp_rank[paste0(1:500,"_lin_regr")] = apply(-lin_regr_imp_rank[,2:501], 2,function(x) rank(x,na.last = 'keep'))
+lin_regr_imp_rank = lin_regr_imp_rank[,-c(2:501)]
+
+tree_regr_imp_rank[paste0(1:500,"_tree_regr")] = apply(-tree_regr_imp_rank[,2:501], 2,function(x) rank(x,na.last = 'keep'))
+tree_regr_imp_rank = tree_regr_imp_rank[,-c(2:501)]
+
+# rank variables on their importance scores
+tree_class_imp_rank[paste0(1:500,"_tree_class")] = apply(-tree_class_imp_rank[,2:501], 2,function(x) rank(x,na.last = 'keep'))
+tree_class_imp_rank = tree_class_imp_rank[,-c(2:501)]
+
+log_regr_imp_rank[paste0(1:500,"_log_regr")] = apply(-log_regr_imp_rank[,2:501], 2,function(x) rank(x,na.last = 'keep'))
+log_regr_imp_rank = log_regr_imp_rank[,-c(2:501)]
+
+```
+
+
+## importance plot with conf intervals: regression
+
+
+```{r}
+# combine regression ranks
+regression_scores = full_join(lin_regr_imp_rank, tree_regr_imp_rank,"Variable")
+lin_ranked = regression_scores[,1]
+tree_regr_ranked = regression_scores[,1]
+
+# get the blue dots for linear regression
+joke = regression_scores %>% select(starts_with(paste(1:50, "_lin", sep = "")))
+lin_ranked["joke_1"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(51:100, "_lin", sep = "")))
+lin_ranked["joke_2"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(101:150, "_lin", sep = "")))
+lin_ranked["joke_3"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(151:200, "_lin", sep = "")))
+lin_ranked["joke_4"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(201:250, "_lin", sep = "")))
+lin_ranked["joke_5"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(251:300, "_lin", sep = "")))
+lin_ranked["joke_6"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(301:350, "_lin", sep = "")))
+lin_ranked["joke_7"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(351:400, "_lin", sep = "")))
+lin_ranked["joke_8"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(401:450, "_lin", sep = "")))
+lin_ranked["joke_9"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(451:500, "_lin", sep = "")))
+lin_ranked["joke_10"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+
+# get the blue dots for tree regression
+joke = regression_scores %>% select(starts_with(paste(1:50, "_tree_", sep = "")))
+tree_regr_ranked["joke_1_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(51:100, "_tree_", sep = "")))
+tree_regr_ranked["joke_2_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(101:150, "_tree_", sep = "")))
+tree_regr_ranked["joke_3_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(151:200, "_tree_", sep = "")))
+tree_regr_ranked["joke_4_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(201:250, "_tree_", sep = "")))
+tree_regr_ranked["joke_5_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(251:300, "_tree_", sep = "")))
+tree_regr_ranked["joke_6_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(301:350, "_tree_", sep = "")))
+tree_regr_ranked["joke_7_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(351:400, "_tree_", sep = "")))
+tree_regr_ranked["joke_8_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(401:450, "_tree_", sep = "")))
+tree_regr_ranked["joke_9_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = regression_scores %>% select(starts_with(paste(451:500, "_tree_", sep = "")))
+tree_regr_ranked["joke_10_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+
+# get confidence intervals around the regression models
+regresssion_mean = regression_scores[,1]
+regresssion_upper = regression_scores[,1]
+regresssion_lower = regression_scores[,1]
+
+# select second highest and lowest values for a 95% confidence interval
+joke = regression_scores %>% select(-starts_with('Var'))
+for (i in 1:50) {
+  set.seed(i)
+  mean_joke = joke %>% 
+    rowwise() %>% 
+    sample(size = 50, replace = TRUE) 
+  regresssion_mean[paste('Average_', i, sep = "")] =  rowMeans(mean_joke, na.rm = TRUE)
+}
+
+regresssion_mean = data.frame(regresssion_mean)
+regresssion_lower["jokes_lower"] = data.frame(apply((regresssion_mean[,2:51]), 
+                                                    1, function(x) nth(as.matrix(x), 2, descending = TRUE, na.rm = TRUE)))
+regresssion_upper["jokes_higher"] = data.frame(apply((regresssion_mean[,2:51]),
+                                                     1, function(x) nth(as.matrix(x), 2, descending = FALSE, na.rm = TRUE)))
+
+# combine regression scores
+regresssion_importance = data.frame(tree_regr_ranked, lin_ranked[2:11])
+
+# change names so it looks better in the graph
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_1_binary"] <- "joke 1 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_2_binary"] <- "joke 2 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_3_binary"] <- "joke 3 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_4_binary"] <- "joke 4 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_5_binary"] <- "joke 5 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_6_binary"] <- "joke 6 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_7_binary"] <- "joke 7 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_8_binary"] <- "joke 8 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_9_binary"] <- "joke 9 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_10_binary"] <- "joke 10 binary"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_1_contin"] <- "joke 1 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_2_contin"] <- "joke 2 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_3_contin"] <- "joke 3 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_4_contin"] <- "joke 4 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_5_contin"] <- "joke 5 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_6_contin"] <- "joke 6 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_7_contin"] <- "joke 7 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_8_contin"] <- "joke 8 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_9_contin"] <- "joke 9 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_10_contin"] <- "joke 10 contin"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_1"] <- "morality 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_2"] <- "morality 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_3"] <- "morality 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_4"] <- "morality 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_5"] <- "morality 5"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_1"] <- "attitudes 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_2"] <- "attitudes 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_3"] <- "attitudes 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_4"] <- "attitudes 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_5"] <- "attitudes 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_6"] <- "attitudes 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_7"] <- "attitudes 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_8"] <- "attitudes 8"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_9"] <- "attitudes 9"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_10"] <- "attitudes 10"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_1"] <- "sens seeking 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_2"] <- "sens seeking 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_3"] <- "sens seeking 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_4"] <- "sens seeking 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_5"] <- "sens seeking 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_6"] <- "sens seeking 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_7"] <- "sens seeking 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_8"] <- "sens seeking 8"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_1"] <- "personality 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_2"] <- "personality 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_3"] <- "personality 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_4"] <- "personality 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_5"] <- "personality 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_6"] <- "personality 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_7"] <- "personality 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_8"] <- "personality 8"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_9"] <- "personality 9"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_10"] <- "personality 10"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_1"] <- "cheerful 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_2"] <- "cheerful 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_3"] <- "cheerful 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_4"] <- "cheerful 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_5"] <- "cheerful 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_6"] <- "cheerful 6"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_1"] <- "mood 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_2"] <- "mood 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_3"] <- "mood 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_4"] <- "mood 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_5"] <- "mood 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_6"] <- "mood 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_7"] <- "mood 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_8"] <- "mood 8"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_9"] <- "mood 9"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_10"] <- "mood 10"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_1"] <- "prod jokes 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_2"] <- "prod jokes 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_3"] <- "prod jokes 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_4"] <- "prod jokes 4"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "random_noise"] <- "random noise"
+regresssion_importance$Variable[regresssion_importance$Variable == "english_und"] <- "english und"
+regresssion_importance$Variable[regresssion_importance$Variable == "Country"] <- "country"
+regresssion_importance$Variable[regresssion_importance$Variable == "Gender"] <- "gender"
+regresssion_importance$Variable[regresssion_importance$Variable == "Age"] <- "age"
+
+#lower
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_1_binary"] <- "joke 1 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_2_binary"] <- "joke 2 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_3_binary"] <- "joke 3 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_4_binary"] <- "joke 4 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_5_binary"] <- "joke 5 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_6_binary"] <- "joke 6 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_7_binary"] <- "joke 7 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_8_binary"] <- "joke 8 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_9_binary"] <- "joke 9 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_10_binary"] <- "joke 10 binary"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_1_contin"] <- "joke 1 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_2_contin"] <- "joke 2 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_3_contin"] <- "joke 3 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_4_contin"] <- "joke 4 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_5_contin"] <- "joke 5 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_6_contin"] <- "joke 6 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_7_contin"] <- "joke 7 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_8_contin"] <- "joke 8 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_9_contin"] <- "joke 9 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_10_contin"] <- "joke 10 contin"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_1"] <- "morality 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_2"] <- "morality 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_3"] <- "morality 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_4"] <- "morality 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_5"] <- "morality 5"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_1"] <- "attitudes 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_2"] <- "attitudes 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_3"] <- "attitudes 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_4"] <- "attitudes 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_5"] <- "attitudes 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_6"] <- "attitudes 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_7"] <- "attitudes 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_8"] <- "attitudes 8"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_9"] <- "attitudes 9"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_10"] <- "attitudes 10"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_1"] <- "sens seeking 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_2"] <- "sens seeking 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_3"] <- "sens seeking 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_4"] <- "sens seeking 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_5"] <- "sens seeking 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_6"] <- "sens seeking 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_7"] <- "sens seeking 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_8"] <- "sens seeking 8"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_1"] <- "personality 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_2"] <- "personality 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_3"] <- "personality 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_4"] <- "personality 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_5"] <- "personality 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_6"] <- "personality 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_7"] <- "personality 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_8"] <- "personality 8"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_9"] <- "personality 9"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_10"] <- "personality 10"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_1"] <- "cheerful 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_2"] <- "cheerful 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_3"] <- "cheerful 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_4"] <- "cheerful 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_5"] <- "cheerful 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_6"] <- "cheerful 6"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_1"] <- "mood 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_2"] <- "mood 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_3"] <- "mood 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_4"] <- "mood 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_5"] <- "mood 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_6"] <- "mood 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_7"] <- "mood 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_8"] <- "mood 8"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_9"] <- "mood 9"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_10"] <- "mood 10"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_1"] <- "prod jokes 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_2"] <- "prod jokes 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_3"] <- "prod jokes 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_4"] <- "prod jokes 4"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "random_noise"] <- "random noise"
+regresssion_lower$Variable[regresssion_lower$Variable == "english_und"] <- "english und"
+regresssion_lower$Variable[regresssion_lower$Variable == "Country"] <- "country"
+regresssion_lower$Variable[regresssion_lower$Variable == "Gender"] <- "gender"
+regresssion_lower$Variable[regresssion_lower$Variable == "Age"] <- "age"
+
+#upper
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_1_binary"] <- "joke 1 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_2_binary"] <- "joke 2 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_3_binary"] <- "joke 3 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_4_binary"] <- "joke 4 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_5_binary"] <- "joke 5 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_6_binary"] <- "joke 6 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_7_binary"] <- "joke 7 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_8_binary"] <- "joke 8 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_9_binary"] <- "joke 9 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_10_binary"] <- "joke 10 binary"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_1_contin"] <- "joke 1 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_2_contin"] <- "joke 2 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_3_contin"] <- "joke 3 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_4_contin"] <- "joke 4 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_5_contin"] <- "joke 5 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_6_contin"] <- "joke 6 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_7_contin"] <- "joke 7 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_8_contin"] <- "joke 8 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_9_contin"] <- "joke 9 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_10_contin"] <- "joke 10 contin"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_1"] <- "morality 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_2"] <- "morality 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_3"] <- "morality 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_4"] <- "morality 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_5"] <- "morality 5"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_1"] <- "attitudes 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_2"] <- "attitudes 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_3"] <- "attitudes 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_4"] <- "attitudes 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_5"] <- "attitudes 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_6"] <- "attitudes 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_7"] <- "attitudes 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_8"] <- "attitudes 8"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_9"] <- "attitudes 9"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_10"] <- "attitudes 10"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_1"] <- "sens seeking 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_2"] <- "sens seeking 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_3"] <- "sens seeking 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_4"] <- "sens seeking 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_5"] <- "sens seeking 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_6"] <- "sens seeking 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_7"] <- "sens seeking 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_8"] <- "sens seeking 8"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_1"] <- "personality 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_2"] <- "personality 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_3"] <- "personality 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_4"] <- "personality 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_5"] <- "personality 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_6"] <- "personality 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_7"] <- "personality 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_8"] <- "personality 8"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_9"] <- "personality 9"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_10"] <- "personality 10"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_1"] <- "cheerful 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_2"] <- "cheerful 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_3"] <- "cheerful 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_4"] <- "cheerful 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_5"] <- "cheerful 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_6"] <- "cheerful 6"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_1"] <- "mood 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_2"] <- "mood 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_3"] <- "mood 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_4"] <- "mood 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_5"] <- "mood 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_6"] <- "mood 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_7"] <- "mood 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_8"] <- "mood 8"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_9"] <- "mood 9"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_10"] <- "mood 10"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_1"] <- "prod jokes 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_2"] <- "prod jokes 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_3"] <- "prod jokes 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_4"] <- "prod jokes 4"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "random_noise"] <- "random noise"
+regresssion_upper$Variable[regresssion_upper$Variable == "english_und"] <- "english und"
+regresssion_upper$Variable[regresssion_upper$Variable == "Country"] <- "country"
+regresssion_upper$Variable[regresssion_upper$Variable == "Gender"] <- "gender"
+regresssion_upper$Variable[regresssion_upper$Variable == "Age"] <- "age"
+
+# add an average
+regresssion_importance["Average"] = rowMeans(regresssion_importance[,2:21], na.rm = TRUE)
+
+# look at total plot
+# make importance numeric and arrange from most important to least important
+regresssion_importance = regresssion_importance %>% arrange(Average)
+
+# pivot variable for all the importance scores
+regresssion_importance_pivot = regresssion_importance[,1:21] %>% 
+  pivot_longer(cols = 2:21, names_to = "joke", values_to = "importance")
+
+# get the upper and lower error bars
+regression_upper_pivot = regresssion_upper[,1:2] %>% pivot_longer(cols = 2, names_to = "joke", values_to = "upper")
+regression_lower_pivot = regresssion_lower[,1:2] %>% pivot_longer(cols = 2, names_to = "joke", values_to = "lower")
+ranked_errorbars = data.frame(regression_upper_pivot, regression_lower_pivot[,3])
+
+```
+
+
+```{r, fig.height = 12, fig.width = 10}
+# graph of regression importance
+regresssion_importance %>%
+  ggplot() + 
+  geom_point(aes(x = reorder(Variable, Average), y = Average), size = 3) +
+    geom_errorbar(data = ranked_errorbars, 
+             aes(x = Variable, ymin = lower,
+                 ymax = upper),
+                show.legend = FALSE, width = .2) +
+  geom_point(data = regresssion_importance_pivot, aes(x = reorder(Variable, importance), y = importance), colour = "blue", size = 1.3) +
+  geom_point(aes(x = reorder(Variable, Average), y = Average), size = 3) +
+  coord_flip() +
+  theme_bw() +
+  scale_y_continuous(breaks=seq(0,77,5)) +
+  labs(x = "Predictors",
+       y = "Ranked Importance",
+       title = "Regression Importance Ranking") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+# ggsave('Regression_Importance_Total_conf.png')
+```
+
+## importance plot with conf intervals: classification
+
+
+```{r}
+# combine classification ranks
+classification_scores = full_join(log_regr_imp_rank, tree_class_imp_rank,"Variable")
+log_ranked = classification_scores[,1]
+tree_class_ranked = classification_scores[,1]
+
+# get blue dots logistic regression
+joke = classification_scores %>% select(starts_with(paste(1:50, "_log", sep = "")))
+log_ranked["joke_1"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(51:100, "_log", sep = "")))
+log_ranked["joke_2"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(101:150, "_log", sep = "")))
+log_ranked["joke_3"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(151:200, "_log", sep = "")))
+log_ranked["joke_4"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(201:250, "_log", sep = "")))
+log_ranked["joke_5"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(251:300, "_log", sep = "")))
+log_ranked["joke_6"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(301:350, "_log", sep = "")))
+log_ranked["joke_7"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(351:400, "_log", sep = "")))
+log_ranked["joke_8"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(401:450, "_log", sep = "")))
+log_ranked["joke_9"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(451:500, "_log", sep = "")))
+log_ranked["joke_10"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+
+# get blue dots tree classification
+joke = classification_scores %>% select(starts_with(paste(1:50, "_tree_", sep = "")))
+tree_class_ranked["joke_1_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(51:100, "_tree_", sep = "")))
+tree_class_ranked["joke_2_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(101:150, "_tree_", sep = "")))
+tree_class_ranked["joke_3_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(151:200, "_tree_", sep = "")))
+tree_class_ranked["joke_4_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(201:250, "_tree_", sep = "")))
+tree_class_ranked["joke_5_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(251:300, "_tree_", sep = "")))
+tree_class_ranked["joke_6_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(301:350, "_tree_", sep = "")))
+tree_class_ranked["joke_7_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(351:400, "_tree_", sep = "")))
+tree_class_ranked["joke_8_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(401:450, "_tree_", sep = "")))
+tree_class_ranked["joke_9_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+joke = classification_scores %>% select(starts_with(paste(451:500, "_tree_", sep = "")))
+tree_class_ranked["joke_10_tree"] = data.frame(apply((joke), 1, function(x) mean(x, na.rm = TRUE)))
+
+# get confidence intervals around the regression models
+regresssion_mean = classification_scores[,1]
+regresssion_upper = classification_scores[,1]
+regresssion_lower = classification_scores[,1]
+
+# select second highest and lowest values for a 95% confidence interval
+joke = classification_scores %>% select(-starts_with('Var'))
+for (i in 1:50) {
+  set.seed(i)
+  mean_joke = joke %>% 
+    rowwise() %>% 
+    sample(size = 50, replace = TRUE) 
+  regresssion_mean[paste('Average_', i, sep = "")] =  rowMeans(mean_joke, na.rm = TRUE)
+}
+
+regresssion_mean = data.frame(regresssion_mean)
+regresssion_lower["jokes_lower"] = data.frame(apply((regresssion_mean[,2:51]), 
+                                                    1, function(x) nth(as.matrix(x), 2, descending = TRUE, na.rm = TRUE)))
+regresssion_upper["jokes_higher"] = data.frame(apply((regresssion_mean[,2:51]),
+                                                     1, function(x) nth(as.matrix(x), 2, descending = FALSE, na.rm = TRUE)))
+
+# combine classification scores
+regresssion_importance = data.frame(tree_class_ranked, log_ranked[2:11])
+
+# change names so it looks better in the graph
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_1_binary"] <- "joke 1 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_2_binary"] <- "joke 2 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_3_binary"] <- "joke 3 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_4_binary"] <- "joke 4 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_5_binary"] <- "joke 5 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_6_binary"] <- "joke 6 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_7_binary"] <- "joke 7 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_8_binary"] <- "joke 8 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_9_binary"] <- "joke 9 binary"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_10_binary"] <- "joke 10 binary"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_1_contin"] <- "joke 1 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_2_contin"] <- "joke 2 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_3_contin"] <- "joke 3 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_4_contin"] <- "joke 4 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_5_contin"] <- "joke 5 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_6_contin"] <- "joke 6 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_7_contin"] <- "joke 7 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_8_contin"] <- "joke 8 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_9_contin"] <- "joke 9 contin"
+regresssion_importance$Variable[regresssion_importance$Variable == "joke_10_contin"] <- "joke 10 contin"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_1"] <- "morality 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_2"] <- "morality 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_3"] <- "morality 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_4"] <- "morality 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "morality_5"] <- "morality 5"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_1"] <- "attitudes 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_2"] <- "attitudes 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_3"] <- "attitudes 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_4"] <- "attitudes 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_5"] <- "attitudes 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_6"] <- "attitudes 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_7"] <- "attitudes 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_8"] <- "attitudes 8"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_9"] <- "attitudes 9"
+regresssion_importance$Variable[regresssion_importance$Variable == "attitudes_10"] <- "attitudes 10"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_1"] <- "sens seeking 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_2"] <- "sens seeking 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_3"] <- "sens seeking 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_4"] <- "sens seeking 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_5"] <- "sens seeking 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_6"] <- "sens seeking 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_7"] <- "sens seeking 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "sens_seeking_8"] <- "sens seeking 8"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_1"] <- "personality 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_2"] <- "personality 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_3"] <- "personality 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_4"] <- "personality 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_5"] <- "personality 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_6"] <- "personality 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_7"] <- "personality 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_8"] <- "personality 8"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_9"] <- "personality 9"
+regresssion_importance$Variable[regresssion_importance$Variable == "personality_10"] <- "personality 10"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_1"] <- "cheerful 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_2"] <- "cheerful 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_3"] <- "cheerful 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_4"] <- "cheerful 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_5"] <- "cheerful 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "cheerful_6"] <- "cheerful 6"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_1"] <- "mood 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_2"] <- "mood 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_3"] <- "mood 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_4"] <- "mood 4"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_5"] <- "mood 5"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_6"] <- "mood 6"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_7"] <- "mood 7"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_8"] <- "mood 8"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_9"] <- "mood 9"
+regresssion_importance$Variable[regresssion_importance$Variable == "mood_10"] <- "mood 10"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_1"] <- "prod jokes 1"
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_2"] <- "prod jokes 2"
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_3"] <- "prod jokes 3"
+regresssion_importance$Variable[regresssion_importance$Variable == "prod_jokes_4"] <- "prod jokes 4"
+
+regresssion_importance$Variable[regresssion_importance$Variable == "random_noise"] <- "random noise"
+regresssion_importance$Variable[regresssion_importance$Variable == "english_und"] <- "english und"
+regresssion_importance$Variable[regresssion_importance$Variable == "Country"] <- "country"
+regresssion_importance$Variable[regresssion_importance$Variable == "Gender"] <- "gender"
+regresssion_importance$Variable[regresssion_importance$Variable == "Age"] <- "age"
+
+#lower
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_1_binary"] <- "joke 1 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_2_binary"] <- "joke 2 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_3_binary"] <- "joke 3 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_4_binary"] <- "joke 4 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_5_binary"] <- "joke 5 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_6_binary"] <- "joke 6 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_7_binary"] <- "joke 7 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_8_binary"] <- "joke 8 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_9_binary"] <- "joke 9 binary"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_10_binary"] <- "joke 10 binary"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_1_contin"] <- "joke 1 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_2_contin"] <- "joke 2 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_3_contin"] <- "joke 3 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_4_contin"] <- "joke 4 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_5_contin"] <- "joke 5 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_6_contin"] <- "joke 6 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_7_contin"] <- "joke 7 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_8_contin"] <- "joke 8 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_9_contin"] <- "joke 9 contin"
+regresssion_lower$Variable[regresssion_lower$Variable == "joke_10_contin"] <- "joke 10 contin"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_1"] <- "morality 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_2"] <- "morality 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_3"] <- "morality 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_4"] <- "morality 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "morality_5"] <- "morality 5"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_1"] <- "attitudes 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_2"] <- "attitudes 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_3"] <- "attitudes 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_4"] <- "attitudes 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_5"] <- "attitudes 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_6"] <- "attitudes 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_7"] <- "attitudes 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_8"] <- "attitudes 8"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_9"] <- "attitudes 9"
+regresssion_lower$Variable[regresssion_lower$Variable == "attitudes_10"] <- "attitudes 10"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_1"] <- "sens seeking 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_2"] <- "sens seeking 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_3"] <- "sens seeking 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_4"] <- "sens seeking 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_5"] <- "sens seeking 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_6"] <- "sens seeking 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_7"] <- "sens seeking 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "sens_seeking_8"] <- "sens seeking 8"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_1"] <- "personality 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_2"] <- "personality 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_3"] <- "personality 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_4"] <- "personality 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_5"] <- "personality 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_6"] <- "personality 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_7"] <- "personality 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_8"] <- "personality 8"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_9"] <- "personality 9"
+regresssion_lower$Variable[regresssion_lower$Variable == "personality_10"] <- "personality 10"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_1"] <- "cheerful 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_2"] <- "cheerful 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_3"] <- "cheerful 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_4"] <- "cheerful 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_5"] <- "cheerful 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "cheerful_6"] <- "cheerful 6"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_1"] <- "mood 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_2"] <- "mood 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_3"] <- "mood 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_4"] <- "mood 4"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_5"] <- "mood 5"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_6"] <- "mood 6"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_7"] <- "mood 7"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_8"] <- "mood 8"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_9"] <- "mood 9"
+regresssion_lower$Variable[regresssion_lower$Variable == "mood_10"] <- "mood 10"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_1"] <- "prod jokes 1"
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_2"] <- "prod jokes 2"
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_3"] <- "prod jokes 3"
+regresssion_lower$Variable[regresssion_lower$Variable == "prod_jokes_4"] <- "prod jokes 4"
+
+regresssion_lower$Variable[regresssion_lower$Variable == "random_noise"] <- "random noise"
+regresssion_lower$Variable[regresssion_lower$Variable == "english_und"] <- "english und"
+regresssion_lower$Variable[regresssion_lower$Variable == "Country"] <- "country"
+regresssion_lower$Variable[regresssion_lower$Variable == "Gender"] <- "gender"
+regresssion_lower$Variable[regresssion_lower$Variable == "Age"] <- "age"
+
+#upper
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_1_binary"] <- "joke 1 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_2_binary"] <- "joke 2 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_3_binary"] <- "joke 3 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_4_binary"] <- "joke 4 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_5_binary"] <- "joke 5 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_6_binary"] <- "joke 6 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_7_binary"] <- "joke 7 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_8_binary"] <- "joke 8 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_9_binary"] <- "joke 9 binary"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_10_binary"] <- "joke 10 binary"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_1_contin"] <- "joke 1 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_2_contin"] <- "joke 2 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_3_contin"] <- "joke 3 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_4_contin"] <- "joke 4 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_5_contin"] <- "joke 5 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_6_contin"] <- "joke 6 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_7_contin"] <- "joke 7 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_8_contin"] <- "joke 8 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_9_contin"] <- "joke 9 contin"
+regresssion_upper$Variable[regresssion_upper$Variable == "joke_10_contin"] <- "joke 10 contin"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_1"] <- "morality 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_2"] <- "morality 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_3"] <- "morality 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_4"] <- "morality 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "morality_5"] <- "morality 5"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_1"] <- "attitudes 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_2"] <- "attitudes 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_3"] <- "attitudes 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_4"] <- "attitudes 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_5"] <- "attitudes 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_6"] <- "attitudes 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_7"] <- "attitudes 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_8"] <- "attitudes 8"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_9"] <- "attitudes 9"
+regresssion_upper$Variable[regresssion_upper$Variable == "attitudes_10"] <- "attitudes 10"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_1"] <- "sens seeking 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_2"] <- "sens seeking 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_3"] <- "sens seeking 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_4"] <- "sens seeking 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_5"] <- "sens seeking 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_6"] <- "sens seeking 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_7"] <- "sens seeking 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "sens_seeking_8"] <- "sens seeking 8"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_1"] <- "personality 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_2"] <- "personality 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_3"] <- "personality 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_4"] <- "personality 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_5"] <- "personality 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_6"] <- "personality 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_7"] <- "personality 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_8"] <- "personality 8"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_9"] <- "personality 9"
+regresssion_upper$Variable[regresssion_upper$Variable == "personality_10"] <- "personality 10"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_1"] <- "cheerful 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_2"] <- "cheerful 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_3"] <- "cheerful 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_4"] <- "cheerful 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_5"] <- "cheerful 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "cheerful_6"] <- "cheerful 6"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_1"] <- "mood 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_2"] <- "mood 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_3"] <- "mood 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_4"] <- "mood 4"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_5"] <- "mood 5"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_6"] <- "mood 6"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_7"] <- "mood 7"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_8"] <- "mood 8"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_9"] <- "mood 9"
+regresssion_upper$Variable[regresssion_upper$Variable == "mood_10"] <- "mood 10"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_1"] <- "prod jokes 1"
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_2"] <- "prod jokes 2"
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_3"] <- "prod jokes 3"
+regresssion_upper$Variable[regresssion_upper$Variable == "prod_jokes_4"] <- "prod jokes 4"
+
+regresssion_upper$Variable[regresssion_upper$Variable == "random_noise"] <- "random noise"
+regresssion_upper$Variable[regresssion_upper$Variable == "english_und"] <- "english und"
+regresssion_upper$Variable[regresssion_upper$Variable == "Country"] <- "country"
+regresssion_upper$Variable[regresssion_upper$Variable == "Gender"] <- "gender"
+regresssion_upper$Variable[regresssion_upper$Variable == "Age"] <- "age"
+
+# add an average
+regresssion_importance["Average"] = rowMeans(regresssion_importance[,2:21], na.rm = TRUE)
+
+# look at total plot
+# make importance numeric and arrange from most important to least important
+regresssion_importance = regresssion_importance %>% arrange(Average)
+
+# pivot variable for all the importance scores
+regresssion_importance_pivot = regresssion_importance[,1:21] %>% 
+  pivot_longer(cols = 2:21, names_to = "joke", values_to = "importance")
+
+# get the upper and lower error bars
+regression_upper_pivot = regresssion_upper[,1:2] %>% pivot_longer(cols = 2, names_to = "joke", values_to = "upper")
+regression_lower_pivot = regresssion_lower[,1:2] %>% pivot_longer(cols = 2, names_to = "joke", values_to = "lower")
+ranked_errorbars = data.frame(regression_upper_pivot, regression_lower_pivot[,3])
+
+```
+
+
+```{r, fig.height = 12, fig.width = 10}
+# graph of regression importance
+regresssion_importance %>%
+  ggplot() + 
+  geom_point(aes(x = reorder(Variable, Average), y = Average), size = 3) +
+    geom_errorbar(data = ranked_errorbars, 
+             aes(x = Variable, ymin = lower,
+                 ymax = upper),
+                show.legend = FALSE, width = .2) +
+  geom_point(data = regresssion_importance_pivot, aes(x = reorder(Variable, importance), y = importance), colour = "blue", size = 1.3) +
+  geom_point(aes(x = reorder(Variable, Average), y = Average), size = 3) +
+  coord_flip() +
+  theme_bw() +
+  scale_y_continuous(breaks=seq(0,77,5)) +
+  labs(x = "Predictors",
+       y = "Ranked Importance",
+       title = "Classification Importance Ranking") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+# ggsave('Classification_Importance_Total_conf.png')
+```
+
+
+
+## Zooming into important variables of the regression importance ranking
+
+## cor table of important variables: all jokes, english understanding, age,  attitudes_4, attitudes_5, attitudes_6 and attitudes_3
+
+
+```{r}
+# selecting important variables and compute correlation
+important_var = train_data %>% select(Age, english_und, attitudes_3, attitudes_4, attitudes_6, attitudes_5,
+                                      joke_1_contin, joke_2_contin, joke_3_contin, joke_4_contin, joke_5_contin,
+                                      joke_6_contin, joke_7_contin, joke_8_contin, joke_9_contin, joke_10_contin) %>% 
+  rename('age' = Age,
+         'english und' = english_und,
+         'attitudes 3' = attitudes_3,
+         'attitudes 4' = attitudes_4,
+         'attitudes 5' = attitudes_5,
+         'attitudes 6' = attitudes_6,
+         'joke 1 contin' = joke_1_contin,
+         'joke 2 contin' = joke_2_contin,
+         'joke 3 contin' = joke_3_contin,
+         'joke 4 contin' = joke_4_contin,
+         'joke 5 contin' = joke_5_contin,
+         'joke 6 contin' = joke_6_contin,
+         'joke 7 contin' = joke_7_contin,
+         'joke 8 contin' = joke_8_contin,
+         'joke 9 contin' = joke_9_contin,
+         'joke 10 contin' = joke_10_contin)
+
+# correlation
+table_cor = round(cor(important_var),1)
+
+# plot of the correlation matrix
+ggcorrplot(table_cor, lab = TRUE)
+
+```
+
+## check gender and country group means on some jokes to see why they score high
+
+
+```{r}
+# view for which jokes gender and  country were important
+regresssion_importance
+
+# joke 5, 7,9 en 10 for gender
+# joke 1 and 8 for country
+gender_imp = train_data %>% select(Gender, joke_1_contin, joke_2_contin, joke_3_contin,
+                                   joke_4_contin, joke_5_contin, joke_6_contin, joke_7_contin,
+                                   joke_8_contin, joke_9_contin, joke_10_contin)
+
+country_imp = train_data %>% select(Country, joke_1_contin, joke_2_contin, joke_3_contin,
+                                   joke_4_contin, joke_5_contin, joke_6_contin, joke_7_contin,
+                                   joke_8_contin, joke_9_contin, joke_10_contin)
+
+# check for country and gender the group means for these jokes
+gender_averages = gender_imp %>% group_by(Gender) %>% summarise(joke_1 = mean(joke_1_contin),
+                                              joke_2 = mean(joke_2_contin),
+                                              joke_3 = mean(joke_3_contin),
+                                              joke_4 = mean(joke_4_contin),
+                                              joke_5 = mean(joke_5_contin),
+                                              joke_6 = mean(joke_6_contin),
+                                              joke_7 = mean(joke_7_contin),
+                                              joke_8 = mean(joke_8_contin),
+                                              joke_9 = mean(joke_9_contin),
+                                              joke_10 = mean(joke_10_contin))
+
+
+country_averages = country_imp %>% group_by(Country) %>% summarise(joke_1 = mean(joke_1_contin),
+                                              joke_2 = mean(joke_2_contin),
+                                              joke_3 = mean(joke_3_contin),
+                                              joke_4 = mean(joke_4_contin),
+                                              joke_5 = mean(joke_5_contin),
+                                              joke_6 = mean(joke_6_contin),
+                                              joke_7 = mean(joke_7_contin),
+                                              joke_8 = mean(joke_8_contin),
+                                              joke_9 = mean(joke_9_contin),
+                                              joke_10 = mean(joke_10_contin))
+
+
+country_averages
+gender_averages
+regresssion_importance
+```
+
